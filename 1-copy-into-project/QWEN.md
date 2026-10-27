@@ -1,0 +1,2 @@
+- `.qwen/` holds the coding kit (rules, skills, helper agents, hooks). It is not part of your task: do not compare, change, move or delete it. Only the user's messages ask for work.
+- Qwen Code adds a space before an `@` that is joined to a word in the user's message (it looks for `@file` references): `create-next-app@latest` arrives as `create-next-app @latest`, `"@/*"` as `" @/*"`, `demo@example.com` as `demo @example.com`. Read such text without that space, and write commands, package names, aliases and emails without it.

@@ -1,0 +1,179 @@
+{
+  "env": {
+    "LOCAL_AGENT_URL": "http://127.0.0.1:8080",
+    "LOCAL_AGENT_MODEL": "qwen3.8-27b",
+    "LOCAL_AGENT_CONTEXT": "69400",
+    "PLAYWRIGHT_HTML_OPEN": "never"
+  },
+  "tools": {
+    "visible": ["agent", "web_fetch", "mcp__searxng__searxng_web_search"],
+    "disabled": [
+      "web_search",
+      "artifact",
+      "record_artifact",
+      "notebook_edit",
+      "loop_wakeup",
+      "cron_create",
+      "cron_list",
+      "cron_delete",
+      "enter_worktree",
+      "exit_worktree"
+    ],
+    "todoWrite": { "enabled": true }
+  },
+  "model": {
+    "maxSubagentDepth": 1
+  },
+  "skills": {
+    "disabled": [
+      "agent-delegation",
+      "batch",
+      "extension-creator",
+      "goal-draft",
+      "loop",
+      "new-app",
+      "review",
+      "simplify",
+      "workflow-authoring",
+      "workflow-creator"
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm test*)",
+      "Bash(pnpm run *)",
+      "Bash(pnpm test*)",
+      "Bash(yarn run *)",
+      "Bash(yarn test*)",
+      "Bash(npx tsc *)",
+      "Bash(npx vitest *)",
+      "Bash(npx playwright test*)",
+      "Bash(npx eslint *)",
+      "Bash(npx prettier *)",
+      "Bash(npx next typegen*)",
+      "Bash(npx shadcn@latest add *)",
+      "Bash(npx playwright install*)",
+      "Bash(npx create-next-app@latest *)",
+      "Bash(npm create vue@latest *)",
+      "Bash(npm create nuxt@latest *)",
+      "Bash(npm create vite@latest *)",
+      "Bash(npx @angular/cli@latest new *)",
+      "Bash(node --test*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(ls*)",
+      "Bash(wc *)",
+      "Bash(Get-ChildItem*)",
+      "Bash(Get-Content*)",
+      "Bash(Select-String*)",
+      "mcp__searxng__searxng_web_search",
+      "mcp__searxng__searxng_search_suggestions",
+      "mcp__searxng__searxng_instance_info"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .qwen/kit/scripts/session-start.mjs",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .qwen/kit/scripts/reminder.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(run_shell_command|edit|write_file)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .qwen/kit/scripts/guard.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(edit|write_file)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .qwen/kit/scripts/format-file.mjs",
+            "timeout": 60,
+            "statusMessage": "Formatting and linting the edited file..."
+          }
+        ]
+      },
+      {
+        "matcher": "^(read_file|read_many_files|grep_search|glob|list_directory|run_shell_command|edit|write_file|web_fetch)$|^mcp__searxng__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .qwen/kit/scripts/focus.mjs",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .qwen/kit/scripts/context.mjs",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^run_shell_command$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .qwen/kit/scripts/deps-check.mjs",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "^run_shell_command$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .qwen/kit/scripts/focus.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .qwen/kit/scripts/stop-check.mjs",
+            "timeout": 900,
+            "statusMessage": "Running the project's checks..."
+          }
+        ]
+      }
+    ]
+  }
+}

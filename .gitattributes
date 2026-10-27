@@ -1,0 +1,5 @@
+# Everything is checked out with LF, also on Windows with core.autocrlf on: the hook scripts match
+# their own Markdown with \n (a CRLF working-style.md broke session-start's LOCAL_AGENT_STE switch).
+* text=auto eol=lf
+# Windows batch files need CRLF line endings (cmd.exe misreads ^ continuations without them).
+*.cmd text eol=crlf

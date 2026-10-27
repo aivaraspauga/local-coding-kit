@@ -1,0 +1,51 @@
+{
+  "env": {
+    "LOCAL_LLAMA_API_KEY": "local"
+  },
+  "modelProviders": {
+    "openai": [
+      {
+        "id": "qwen3.8-27b",
+        "name": "Qwen3.8 27B (local llama.cpp)",
+        "envKey": "LOCAL_LLAMA_API_KEY",
+        "baseUrl": "http://127.0.0.1:8080/v1",
+        "generationConfig": {
+          "timeout": 1800000,
+          "streamIdleTimeoutMs": 600000,
+          "contextWindowSize": 102400,
+          "samplingParams": {
+            "max_tokens": 24000
+          }
+        }
+      }
+    ]
+  },
+  "security": {
+    "auth": {
+      "selectedType": "openai"
+    }
+  },
+  "model": {
+    "name": "qwen3.8-27b"
+  },
+  "mcpServers": {
+    "searxng": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mcp-searxng@2.5.0"],
+      "env": { "SEARXNG_URL": "http://127.0.0.1:8888" }
+    }
+  },
+  "tools": {
+    "approvalMode": "auto-edit"
+  },
+  "ui": {
+    "enableFollowupSuggestions": false
+  },
+  "memory": {
+    "enableManagedAutoMemory": false,
+    "enableManagedAutoDream": false
+  },
+  "privacy": {
+    "usageStatisticsEnabled": false
+  }
+}

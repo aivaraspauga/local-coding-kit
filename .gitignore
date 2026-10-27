@@ -1,0 +1,24 @@
+# Machine-specific launcher settings and personal notes
+launcher/config.cmd
+local-notes/
+
+# Testing and results stay on this PC: the repo is the kit and my setup
+benchmarks/
+docs/findings.md
+docs/decisions.md
+docs/coverage.md
+
+node_modules/
+
+# Written by start-server on every start
+launcher/models.generated.ini
+__pycache__/
+
+# The chat assistant (Open WebUI, images, personal skills) stays on this PC: the repo is the coding kit only
+assistant/
+docs/assistant-guide.md
+launcher/assistant.cmd
+1-copy-into-project.zip
+
+# Personal extras that start-all.cmd calls when present
+launcher/start-extra.cmd

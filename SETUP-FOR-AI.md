@@ -1,0 +1,76 @@
+# Set up this kit in a project (for the AI)
+
+The user asked you to add this kit to their project. The kit is for Qwen Code. Do these steps in order. Use the repo link from the user's message. "The project" is the folder you work in, unless the user named another one. Run every command below in the project folder.
+
+## 1. Download the kit to a temporary folder
+
+```text
+git clone --depth 1 <repo link> "<temp>/local-coding-kit"
+```
+
+`<temp>` is the system temp folder (`$env:TEMP` in PowerShell, `%TEMP%` in cmd, `/tmp` elsewhere). Never clone into the project. No git? Download `<repo link>/archive/refs/heads/main.zip` and unpack it there. Already downloaded it to read this file? Use that copy and go on.
+
+## 2. Copy the kit into the project
+
+If the project already has `.qwen/kit/`, this is an update: go to "Update" below.
+
+Otherwise copy it with this command. It works in every shell (cmd, PowerShell, Bash), never overwrites a file that is already here, and prints the files it kept:
+
+```text
+node -e "const fs=require('fs'),p=require('path');const src=process.argv[1];const kept=[];(function copy(d){for(const e of fs.readdirSync(p.join(src,d),{withFileTypes:true})){const r=p.join(d,e.name);if(e.isDirectory()){fs.mkdirSync(r,{recursive:true});copy(r)}else if(!fs.existsSync(r))fs.copyFileSync(p.join(src,r),r);else if(!fs.readFileSync(r).equals(fs.readFileSync(p.join(src,r))))kept.push(r)}})('');console.log(kept.length?'Kept as they were: '+kept.join(', '):'Copied the kit')" "<temp>/local-coding-kit/1-copy-into-project"
+```
+
+It copies `.qwen/` (rules, skills, helper agents, hooks) and `QWEN.md`.
+
+### Update
+
+Replace the kit's own folders with the new ones:
+
+```text
+node -e "const fs=require('fs');for(const d of ['.qwen/kit','.qwen/skills','.qwen/agents'])fs.cpSync(process.argv[1]+'/'+d,d,{recursive:true,force:true})" "<temp>/local-coding-kit/1-copy-into-project"
+```
+
+Then merge `.qwen/settings.json` (step 3).
+
+## 3. Adapt it to the project
+
+### Merge each file it kept
+
+Keep everything the project has, and add what the kit adds:
+
+- `.qwen/settings.json`: add the kit's `hooks` entries, its `permissions.allow` lines, its `env` keys and its `tools` and `skills` lists. On a conflict, keep the project's value and tell the user.
+- `QWEN.md`, `AGENTS.md`: add the kit's lines at the end.
+
+### The stack
+
+If the project has a `package.json`, delete the framework skills it does not use from `.qwen/skills/`: `react-nextjs`, `shadcn-ui` (only with `components.json`), `vue`, `angular`, `vanilla-web`. Keep all others. In an empty folder, keep all of them.
+
+### Git
+
+If the project is a git repository, add the line `.local-agent/` to `.gitignore` (create it if missing). The kit keeps the plan of the current task there.
+
+### The checks
+
+The kit runs the checks it finds in the `package.json` of the project folder. If the app's `package.json` is only in a subfolder (for example `web/`), or the project checks its code another way, set `LOCAL_AGENT_CHECK` under `env` in `.qwen/settings.json` to the command that runs the checks (for example `cd web && npm run lint && npm test`), and tell the user.
+
+### The model
+
+The kit's `env` in `.qwen/settings.json` names the model server for the context warnings: `LOCAL_AGENT_URL` (default `http://127.0.0.1:8080`) and `LOCAL_AGENT_MODEL` (default `qwen3.8-27b`). If the user's Qwen Code model runs on another server, set both to that server (without `/v1`) and that model's id. If the model is not Qwen3.8-27B and you know its training cutoff, also set `LOCAL_AGENT_MODEL_CUTOFF` (`YYYY-MM`): the kit then lists packages newer than the model.
+
+### This PC (once)
+
+`qwen-code/user-settings.json` in the download holds the Qwen Code user settings the kit is tuned for: no follow-up suggestions and no background memory (each extra request pushes the conversation out of the model server's cache), the web search tool, and the local model. If the user's `~/.qwen/settings.json` lacks `ui.enableFollowupSuggestions: false` or `memory.enableManagedAutoMemory: false`, show the user what the file would add and ask before you change it. Keep every setting they have: merge objects key by key, and add a `modelProviders.openai` entry only when there is none with the same `id`.
+
+If you added the web search tool, download it once now. Its first start can take longer than Qwen Code waits:
+
+```text
+node -e "require('child_process').spawnSync('npx',['-y','mcp-searxng@2.5.0'],{input:'',shell:true,stdio:['pipe','ignore','ignore'],timeout:180000})"
+```
+
+## 4. Clean up
+
+Delete `<temp>/local-coding-kit`. Do not commit unless the user asks.
+
+## 5. Report
+
+Tell the user in a few lines what you copied, merged and deleted. Say that a new conversation loads the kit's hooks. Change nothing else (no app, no `AGENTS.md`, no `git init`) unless the user asks.
