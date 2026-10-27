@@ -10,11 +10,11 @@ import { dirname, join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { checkCommand, fileSignatures, readState } from "../1-copy-into-project/.qwen/kit/scripts/lib/project.mjs";
+import { checkCommand, fileSignatures, readState } from "../kit/.qwen/kit/scripts/lib/project.mjs";
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)));
 // The kit as a project gets it: hook scripts and the working style under .qwen/kit.
-const kitDir = join(kit, "1-copy-into-project", ".qwen", "kit");
+const kitDir = join(kit, "kit", ".qwen", "kit");
 const script = (name) => join(kitDir, "scripts", name);
 
 // Runs a hook as Qwen Code does: JSON on stdin, QWEN_PROJECT_DIR set to the project.
@@ -405,7 +405,7 @@ describe("session-start and reminder", () => {
     assert.match(context, /onboard-repo/);
     for (const skill of ["security", "architecture", "performance", "errors-and-logging", "accessibility", "ui-design", "testing-setup", "deployment"]) {
       assert.match(context, new RegExp(`\`${skill}\``), `working style names the ${skill} skill`);
-      assert.ok(existsSync(join(kit, "1-copy-into-project", ".qwen", "skills", skill, "SKILL.md")), `${skill} skill exists`);
+      assert.ok(existsSync(join(kit, "kit", ".qwen", "skills", skill, "SKILL.md")), `${skill} skill exists`);
     }
   });
   test("session start asks for Simplified Technical English unless LOCAL_AGENT_STE is 0", () => {
@@ -424,7 +424,7 @@ describe("session-start and reminder", () => {
     assert.match(style, /when you reach that kind of work, not before/);
     assert.doesNotMatch(style, /node_modules\/next|npx ng test|<!-- -->/, "stack details live in the framework skills");
     assert.match(style, /at most 5 real defects/);
-    const reviewer = readFileSync(join(kit, "1-copy-into-project", ".qwen", "agents", "reviewer.md"), "utf8");
+    const reviewer = readFileSync(join(kit, "kit", ".qwen", "agents", "reviewer.md"), "utf8");
     assert.match(reviewer, /at most 5 findings[\s\S]*only real defects/);
   });
   test("session start warns about Next.js 16 and shadcn on Base UI only when the project uses them", () => {
@@ -1121,7 +1121,7 @@ describe("status", () => {
 });
 
 describe("the kit's project files", () => {
-  const project = join(kit, "1-copy-into-project");
+  const project = join(kit, "kit");
   const json = (path) => JSON.parse(readFileSync(join(project, path), "utf8"));
 
   test("kit scripts have no control characters in regexes (a project's oxlint fails on them)", () => {
@@ -1193,7 +1193,7 @@ describe("the kit's project files", () => {
 describe("SETUP-FOR-AI.md and the kit's removal", () => {
   // The AI installs and updates the kit with copy-kit.mjs, and removes it with REMOVE.md's steps.
   const setup = readFileSync(join(kit, "SETUP-FOR-AI.md"), "utf8");
-  const source = join(kit, "1-copy-into-project");
+  const source = join(kit, "kit");
   const copy = (cwd) => spawnSync(process.execPath, [join(kit, "copy-kit.mjs")], { cwd, encoding: "utf8" });
   const remove = (cwd) => spawnSync(process.execPath, [join(cwd, ".qwen/kit/scripts/remove.mjs")], { cwd, encoding: "utf8" });
   const read = (dir, name) => readFileSync(join(dir, name), "utf8");

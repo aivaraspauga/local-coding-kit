@@ -14,7 +14,7 @@ node_modules/
 launcher/models.generated.ini
 __pycache__/
 
-1-copy-into-project.zip
+kit.zip
 
 # Personal extras that the launcher scripts use when present
 launcher/start-extra.cmd

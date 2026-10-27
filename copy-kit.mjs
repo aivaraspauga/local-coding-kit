@@ -8,7 +8,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const source = join(dirname(fileURLToPath(import.meta.url)), "1-copy-into-project");
+const source = join(dirname(fileURLToPath(import.meta.url)), "kit");
 const RECORD = ".qwen/kit/installed.json";
 // The kit's files that the project may have its own of: the setup merges the kit's into them.
 const SHARED = ["QWEN.md", ".qwen/settings.json"];
