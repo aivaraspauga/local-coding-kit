@@ -33,7 +33,16 @@ The kit never overwrites your files and does not change your code. It adds `.qwe
 
 To update the kit later, ask the same thing again. Qwen tells you the old and the new version.
 
-To remove the kit, ask Qwen Code to remove it. It deletes only what the kit added and keeps your own files and settings.
+## Remove it from a project
+
+1. In the Qwen Code chat of that project, write:
+
+   > Remove the coding kit from this project.
+
+2. Approve the removal when Qwen Code asks.
+3. Start a new chat. The kit's hooks are gone now.
+
+It deletes only what the kit added. Your code, your own Qwen Code settings and skills, and any kit file you changed stay. Qwen tells you which files it left. Your Qwen Code user settings (`~/.qwen/settings.json`) stay too, because they are for all your projects.
 
 ## My setup
 
