@@ -69,7 +69,7 @@ if (!existsSync(join(root, "AGENTS.md"))) {
 }
 
 // Versions where a model's training data is out of date and its habits break the app. Each claim
-// here is checked by benchmarks/traps.mjs against the fixtures' installed packages.
+// here was checked on a real install of that version.
 const pkg = readJson(join(root, "package.json")) ?? {};
 const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 // Named outright: Qwen skipped the `vue` skill in a Vue task and read vue-router's .d.ts instead (2026-10-11).
@@ -119,7 +119,7 @@ if (vitestConfig && /environment:\s*["']node["']/.test(readFileSync(vitestConfig
   );
 }
 
-// Angular (traps: benchmarks/traps/ng-starter.mjs and ng16-legacy.mjs).
+// Angular.
 const [angularMajor] = version(root, "@angular/core");
 if (angularMajor > 0 && angularMajor < 17) {
   facts.push(
@@ -138,7 +138,7 @@ if (angularMajor > 0 && angularMajor < 17) {
   );
 }
 
-// Vue (traps: benchmarks/traps/vue-starter.mjs and vue2-legacy.mjs).
+// Vue.
 const [vueMajor, vueMinor] = version(root, "vue");
 if (vueMajor === 2) {
   facts.push(
@@ -153,7 +153,7 @@ if (vueMajor === 2) {
   if (vueNotes.length > 0) facts.push(`Vue 3.${vueMinor}: ${vueNotes.join("; ")}. See the \`vue\` skill.`);
 }
 
-// TypeScript and the tsconfig settings that decide what compiles (traps: vanilla-starter.mjs, ts48-legacy.mjs).
+// TypeScript and the tsconfig settings that decide what compiles.
 const [tsMajor] = version(root, "typescript");
 const tsconfigText = ["tsconfig.json", "tsconfig.app.json"]
   .map((name) => (existsSync(join(root, name)) ? readFileSync(join(root, name), "utf8") : ""))

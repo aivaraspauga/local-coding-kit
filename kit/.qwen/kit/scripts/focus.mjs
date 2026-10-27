@@ -56,7 +56,7 @@ const CODE_LINE =
   /^\s*(import |export |const |let |function |return |if \(|<\/?[A-Za-z][\w.]*[ >/]|[}\])];?,?$|await |async |type \w+ =|interface )/;
 
 // Errors with one known fix, each named once per session the first time a shell call shows it.
-// Seen in the 2026-10-24 kit vs no-kit runs (findings.md): each cost Opus a retry, a local model more.
+// Seen in the 2026-10-24 kit vs no-kit runs: each cost Opus a retry, a local model more.
 const KNOWN_ERRORS = [
   [
     /ERESOLVE[\s\S]*@types\/node/,

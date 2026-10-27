@@ -31,6 +31,8 @@ The cost: the model takes longer to finish.
 
 The kit never overwrites your files and does not change your code. It adds `.qwen/` and `QWEN.md`, and adds its lines to the `.qwen/settings.json`, `QWEN.md` or `AGENTS.md` you already have.
 
+**Tips** for the best results (small tasks, plans, the helper agents, `allow <code>`): [docs/usage.md](docs/usage.md).
+
 To update the kit later, ask the same thing again. Qwen tells you the old and the new version.
 
 ## Remove it from a project

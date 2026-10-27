@@ -135,7 +135,7 @@ export function checkCommand(root) {
 // The kit's own files are not formatted to the project's Prettier settings, so `prettier --check .`
 // fails on them and the check command can never pass. Adds the kit's folder (`.qwen/`) to
 // .prettierignore once.
-// Returns true when it changed the file. The benchmark calls this too, as part of installing the kit.
+// Returns true when it changed the file.
 export function ignoreKitInPrettier(root) {
   const pkg = readJson(join(root, "package.json"));
   if (!pkg || !{ ...pkg.dependencies, ...pkg.devDependencies }.prettier) return false;

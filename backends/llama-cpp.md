@@ -43,6 +43,8 @@ llama-server --models-preset launcher\models.generated.ini --models-max 1 --host
 | `n-gpu-layers = 99` | The full model is on the graphics card. |
 | `cache-type-k/v = q4_0` | Keeps the conversation small in memory, so 100K fits on the card together with the model. To change it, use `LLAMA_KV_TYPE`. |
 | `ubatch-size = 256` | Reads prompts in smaller parts. This makes approximately 0.3 GB of card memory free, so less goes to RAM. Writing is approximately 10% faster. Reading speed stays the same. |
+| `cache-ram = 0` | No saved prompt states in the usual RAM (llama.cpp keeps up to 8 GB by default). One state of this model at 100K is approximately 14 GB, so in a long session the server grew to 33 GB, the PC ran out of RAM, and writing fell from approximately 68 to less than 2 tokens each second. A conversation still reuses its own context. |
+| `ctx-checkpoints = 4` | Saved points in a conversation (default 32), also in the usual RAM. With 32, the server grew approximately 0.5 GB for each request. With 4, it stayed the same, and a growing conversation is still read only from where it changed. |
 | `parallel = 1` | One request at a time, with the full context. |
 | `jinja = true` | The model needs this to use tools. |
 | `chat-template-file` | The chat template of the model, with one correction. Some clients send hook notes as system messages during a conversation (Claude Code did). The original template refuses these messages ("System message must be at the beginning"), so each request failed. To change it, use `LLAMA_CHAT_TEMPLATE_FILE` (empty = the template of the model). |
@@ -91,7 +93,7 @@ Real chats (thinking on, usual settings, answers of 3,000 tokens):
 - The llama.cpp documentation recommends it for "iterating over a block of text/code" and for reasoning models that repeat their thinking. An agent that writes again the code that it just read does this.
 - It does not need more card memory.
 - Not known: how frequently the guesses are correct in agent work, and the cost of a wrong guess for the recurrent layers of this hybrid model. (MTP also guesses and checks, and it works on this model.)
-- To compare, look at the writing speed in the server window, or do a benchmark round, with and without it.
+- To compare, look at the writing speed in the server window, with and without it.
 
 **MTP** (`--spec-type draft-mtp`):
 
@@ -110,11 +112,10 @@ If you have a 24 GB card, `set "LLAMA_KV_TYPE=q8_0"` in `config.cmd` is slightly
 
 We compared these settings with the model file and `llama-server --help`. They need no change:
 
-- **The model is a hybrid** (`qwen35`: each 4th layer is full attention, and the other layers are recurrent). Only the full-attention layers need conversation memory. This is one reason why 120K fits. The server cannot rewind recurrent layers, so the reuse of an earlier prompt uses context checkpoints (`--ctx-checkpoints`, default 32). Claude Code only adds to the end of the conversation, so the benchmark runs read approximately 96% of each prompt from the cache.
+- **The model is a hybrid** (`qwen35`: each 4th layer is full attention, and the other layers are recurrent). Only the full-attention layers need conversation memory. This is one reason why 120K fits. The server cannot rewind recurrent layers, so the reuse of an earlier prompt uses context checkpoints (`ctx-checkpoints`, see the table above). A coding chat only adds to the end of the conversation, so the server reads most of each prompt from the cache.
 - **Flash attention** is `auto` (on for CUDA). The `q4_0` conversation memory needs it.
 - **`--fit`** is on, but it changes only the settings that are not set. The context and `n-gpu-layers` are set.
 - **The server keeps past thinking** (`--reasoning-preserve`, on by default, and the template keeps it). If the server removed it, the context would be smaller, but earlier messages would change. Then the server would read the prompt again from a checkpoint for each request.
-- **`--cache-ram`** keeps up to 8 GB of prompt cache in the usual RAM. This is correct for 32 GB.
 - **Sampling** (`top-k 20`, `top-p 0.95`) has the same values as the model file. `temp` is 0.7, not 1.0 (see the table above).
 
 ## If the model repeats itself
