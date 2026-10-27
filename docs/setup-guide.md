@@ -206,11 +206,11 @@ If there is a problem, run `C:\Development\local-coding-kit\launcher\status.cmd`
 1. Type `/model` and pick a stronger model (for example a bigger model on another server), in the same conversation.
 2. If you start a new conversation, tell the model to read `.local-agent/plan.md` and the output of `git diff`. These hold the plan and the work so far. `AGENTS.md` loads by itself.
 
-To remove the kit from a project, delete `.qwen` and `QWEN.md`.
+To remove the kit from a project, ask the AI: *"Remove the coding kit from this project."* It deletes only what the kit added, and keeps your own files and settings.
 
 ## Update
 
-- **The kit in a project:** Ask the AI the same as in step 8: *"Download https://github.com/aivaraspauga/local-coding-kit into a temporary folder and follow its SETUP-FOR-AI.md to update the kit in this project."* It replaces `.qwen\kit`, `.qwen\skills` and `.qwen\agents`, and keeps your settings. Then start a new conversation.
+- **The kit in a project:** Ask the AI the same as in step 8: *"Download https://github.com/aivaraspauga/local-coding-kit into a temporary folder and follow its SETUP-FOR-AI.md to update the kit in this project."* It replaces the kit's files, keeps your settings and the files you changed, and tells you the old and the new version. Then start a new conversation.
 - **llama.cpp:** Close the server window and do step 2 again.
 - **SearXNG:** Run `docker pull searxng/searxng` and `docker rm -f searxng`. Then run the `docker run` line from step 6. Your settings stay.
 

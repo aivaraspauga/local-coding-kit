@@ -31,7 +31,9 @@ The cost: the model takes longer to finish.
 
 The kit never overwrites your files and does not change your code. It adds `.qwen/` and `QWEN.md`, and adds its lines to the `.qwen/settings.json`, `QWEN.md` or `AGENTS.md` you already have.
 
-To update the kit later, ask the same thing again.
+To update the kit later, ask the same thing again. Qwen tells you the old and the new version.
+
+To remove the kit, ask Qwen Code to remove it. It deletes only what the kit added and keeps your own files and settings.
 
 ## My setup
 

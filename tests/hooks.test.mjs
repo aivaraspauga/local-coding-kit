@@ -2,6 +2,7 @@
 // hook receives and check what it prints and its exit code. No model is involved.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -115,6 +116,7 @@ describe("guard", () => {
     ["run_shell_command", { command: `node -e "fs=require('fs');fs.rmSync('.claude',{recursive:true,force:true})"` }, "ask"],
     ["Bash", { command: `python -c "import shutil; shutil.rmtree('data')"` }, "ask"],
     ["Bash", { command: `node -e "require('fs').rmSync('data/demo.db',{force:true})"` }, "allow"],
+    ["run_shell_command", { command: "node .qwen/kit/scripts/remove.mjs" }, "ask"],
     ["Bash", { command: "git reset --hard HEAD~1" }, "ask"],
     ["Bash", { command: "npx prisma migrate reset" }, "ask"],
     ["Edit", { file_path: join(project, "package.json") }, "ask"],
@@ -1196,35 +1198,88 @@ describe("the kit's project files", () => {
   });
 });
 
-describe("SETUP-FOR-AI.md", () => {
-  // The AI installs the kit with these commands; nothing else copies it.
+describe("SETUP-FOR-AI.md and the kit's removal", () => {
+  // The AI installs and updates the kit with copy-kit.mjs, and removes it with REMOVE.md's steps.
   const setup = readFileSync(join(kit, "SETUP-FOR-AI.md"), "utf8");
-  const [copy, update] = [...setup.matchAll(/^node -e "(.+)" "<temp>\/local-coding-kit\/1-copy-into-project"$/gm)].map((m) => m[1]);
   const source = join(kit, "1-copy-into-project");
-  const run = (command, cwd) => spawnSync(process.execPath, ["-e", command, source], { cwd, encoding: "utf8" });
+  const copy = (cwd) => spawnSync(process.execPath, [join(kit, "copy-kit.mjs")], { cwd, encoding: "utf8" });
+  const remove = (cwd) => spawnSync(process.execPath, [join(cwd, ".qwen/kit/scripts/remove.mjs")], { cwd, encoding: "utf8" });
+  const read = (dir, name) => readFileSync(join(dir, name), "utf8");
+  const version = read(source, ".qwen/kit/VERSION").trim();
 
-  test("copies the kit with one command that never overwrites the project's own files", () => {
-    assert.ok(copy && update, "the copy and the update command");
+  test("names the copy script and the removal steps", () => {
+    assert.match(setup, /^node "<temp>\/local-coding-kit\/copy-kit\.mjs"$/m);
+    assert.match(version, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(read(source, "QWEN.md"), /`\.qwen\/kit\/REMOVE\.md`/);
+    assert.ok(existsSync(join(source, ".qwen/kit/REMOVE.md")));
+  });
+
+  test("copies the kit, never overwrites the project's own files, and records what it added", () => {
     const dir = tempProject({ scripts: {} }, { "QWEN.md": "mine\n" });
-    const out = run(copy, dir);
+    const out = copy(dir);
     assert.equal(out.status, 0, out.stderr);
+    assert.ok(out.stdout.includes(`Copied the kit (version ${version}).`), out.stdout);
     assert.match(out.stdout, /Kept as they were: QWEN\.md/);
-    assert.equal(readFileSync(join(dir, "QWEN.md"), "utf8"), "mine\n");
+    assert.equal(read(dir, "QWEN.md"), "mine\n");
     for (const name of [".qwen/settings.json", ".qwen/kit/scripts/guard.mjs", ".qwen/kit/prompt/working-style.md", ".qwen/agents/reviewer.md", ".qwen/skills/debug/SKILL.md"]) {
       assert.ok(existsSync(join(dir, name)), name);
     }
-    assert.match(run(copy, tempProject(null)).stdout, /Copied the kit/);
+    const record = JSON.parse(read(dir, ".qwen/kit/installed.json"));
+    assert.ok(".qwen/settings.json" in record.added && !("QWEN.md" in record.added), "only what it added");
+    assert.equal(record.kit["QWEN.md"], read(source, "QWEN.md"), "the kit's own version of a shared file");
+    assert.doesNotMatch(copy(tempProject(null)).stdout, /Kept/);
   });
 
-  test("an update replaces the kit's own folders and leaves the project's settings to merge", () => {
+  test("an update replaces the kit's files, keeps the ones the user changed and the project's own", () => {
     const dir = tempProject(null);
-    run(copy, dir);
-    writeFileSync(join(dir, ".qwen", "kit", "scripts", "guard.mjs"), "// old\n");
-    writeFileSync(join(dir, ".qwen", "settings.json"), "{}\n");
-    const out = run(update, dir);
+    copy(dir);
+    writeFileSync(join(dir, ".qwen/kit/scripts/guard.mjs"), "// old\n");
+    writeFileSync(join(dir, ".qwen/kit/VERSION"), "2026-01-01\n");
+    writeFileSync(join(dir, ".qwen/settings.json"), "{}\n");
+    writeFileSync(join(dir, ".qwen/skills/debug/SKILL.md"), "my own steps\n");
+    rmSync(join(dir, ".qwen/skills/vue"), { recursive: true });
+    // An older kit file nobody changed: its hash in the record matches.
+    writeFileSync(join(dir, ".qwen/agents/reviewer.md"), "an older version\n");
+    const record = JSON.parse(read(dir, ".qwen/kit/installed.json"));
+    record.added[".qwen/agents/reviewer.md"] = createHash("sha1").update("an older version\n").digest("hex");
+    writeFileSync(join(dir, ".qwen/kit/installed.json"), JSON.stringify(record));
+    const out = copy(dir);
     assert.equal(out.status, 0, out.stderr);
-    const guard = (root) => readFileSync(join(root, ".qwen", "kit", "scripts", "guard.mjs"), "utf8");
-    assert.equal(guard(dir), guard(source));
-    assert.equal(readFileSync(join(dir, ".qwen", "settings.json"), "utf8"), "{}\n");
+    assert.ok(out.stdout.includes(`Updated the kit from version 2026-01-01 to ${version}.`), out.stdout);
+    assert.match(out.stdout, /Kept as they were: .*\.qwen\/settings\.json/);
+    assert.match(out.stdout, /Kept as they were: .*\.qwen\/skills\/debug\/SKILL\.md/);
+    assert.equal(read(dir, ".qwen/kit/scripts/guard.mjs"), read(source, ".qwen/kit/scripts/guard.mjs"));
+    assert.equal(read(dir, ".qwen/agents/reviewer.md"), read(source, ".qwen/agents/reviewer.md"));
+    assert.equal(read(dir, ".qwen/settings.json"), "{}\n");
+    assert.equal(read(dir, ".qwen/skills/debug/SKILL.md"), "my own steps\n");
+    assert.ok(existsSync(join(dir, ".qwen/skills/vue/SKILL.md")), "a skill the setup dropped comes back (step 3 drops it again)");
+    // A kit from before the record: everything in its folders counts as the kit's.
+    const old = tempProject(null);
+    copy(old);
+    rmSync(join(old, ".qwen/kit/installed.json"));
+    rmSync(join(old, ".qwen/kit/VERSION"));
+    writeFileSync(join(old, ".qwen/skills/debug/SKILL.md"), "older\n");
+    assert.match(copy(old).stdout, /from version older \(no number\)/);
+    assert.equal(read(old, ".qwen/skills/debug/SKILL.md"), read(source, ".qwen/skills/debug/SKILL.md"));
+    assert.ok(existsSync(join(old, ".qwen/kit/installed.json")));
+  });
+
+  test("the removal deletes only the kit's unchanged files and leaves the project's", () => {
+    const dir = tempProject({ scripts: {} }, { ".qwen/skills/mine/SKILL.md": "mine\n", "src/app.ts": "x\n" });
+    copy(dir);
+    writeFileSync(join(dir, ".qwen/skills/debug/SKILL.md"), "changed\n");
+    rmSync(join(dir, ".qwen/skills/vue"), { recursive: true });
+    const out = remove(dir);
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /Removed \.qwen\/kit and \d+ other files/);
+    assert.match(out.stdout, /left as they are: \.qwen\/skills\/debug\/SKILL\.md$/m);
+    for (const name of [".qwen/kit", ".qwen/agents", ".qwen/settings.json", "QWEN.md", ".qwen/skills/react-nextjs"]) assert.ok(!existsSync(join(dir, name)), name);
+    for (const name of [".qwen/skills/mine/SKILL.md", ".qwen/skills/debug/SKILL.md", "src/app.ts", "package.json"]) assert.ok(existsSync(join(dir, name)), name);
+    // Without a record it deletes nothing.
+    const old = tempProject(null);
+    copy(old);
+    rmSync(join(old, ".qwen/kit/installed.json"));
+    assert.equal(remove(old).status, 1);
+    assert.ok(existsSync(join(old, ".qwen/kit/scripts/guard.mjs")));
   });
 });

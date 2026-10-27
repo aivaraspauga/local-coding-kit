@@ -12,31 +12,19 @@ git clone --depth 1 <repo link> "<temp>/local-coding-kit"
 
 ## 2. Copy the kit into the project
 
-If the project already has `.qwen/kit/`, this is an update: go to "Update" below.
-
-Otherwise copy it with this command. It works in every shell (cmd, PowerShell, Bash), never overwrites a file that is already here, and prints the files it kept:
-
 ```text
-node -e "const fs=require('fs'),p=require('path');const src=process.argv[1];const kept=[];(function copy(d){for(const e of fs.readdirSync(p.join(src,d),{withFileTypes:true})){const r=p.join(d,e.name);if(e.isDirectory()){fs.mkdirSync(r,{recursive:true});copy(r)}else if(!fs.existsSync(r))fs.copyFileSync(p.join(src,r),r);else if(!fs.readFileSync(r).equals(fs.readFileSync(p.join(src,r))))kept.push(r)}})('');console.log(kept.length?'Kept as they were: '+kept.join(', '):'Copied the kit')" "<temp>/local-coding-kit/1-copy-into-project"
+node "<temp>/local-coding-kit/copy-kit.mjs"
 ```
 
-It copies `.qwen/` (rules, skills, helper agents, hooks) and `QWEN.md`.
+It copies `.qwen/` (rules, skills, helper agents, hooks) and `QWEN.md`, never overwrites a file the project already has, and prints the files it kept as they were. It records what it added in `.qwen/kit/installed.json`, so the kit can be removed later without touching the project's files.
 
-### Update
-
-Replace the kit's own folders with the new ones:
-
-```text
-node -e "const fs=require('fs');for(const d of ['.qwen/kit','.qwen/skills','.qwen/agents'])fs.cpSync(process.argv[1]+'/'+d,d,{recursive:true,force:true})" "<temp>/local-coding-kit/1-copy-into-project"
-```
-
-Then merge `.qwen/settings.json` (step 3).
+If the project already had `.qwen/kit/`, this was an update: it replaced the kit's files with the new version, except the ones the user changed, and printed the old and the new version number. Then do only "Merge each file it kept" and "The stack" in step 3, and go on to step 4.
 
 ## 3. Adapt it to the project
 
 ### Merge each file it kept
 
-Keep everything the project has, and add what the kit adds:
+Keep everything the project has, and add what the kit has and the file lacks:
 
 - `.qwen/settings.json`: add the kit's `hooks` entries, its `permissions.allow` lines, its `env` keys and its `tools` and `skills` lists. On a conflict, keep the project's value and tell the user.
 - `QWEN.md`, `AGENTS.md`: add the kit's lines at the end.
@@ -73,4 +61,4 @@ Delete `<temp>/local-coding-kit`. Do not commit unless the user asks.
 
 ## 5. Report
 
-Tell the user in a few lines what you copied, merged and deleted. Say that a new conversation loads the kit's hooks. Change nothing else (no app, no `AGENTS.md`, no `git init`) unless the user asks.
+Tell the user in a few lines what you copied, merged and deleted. On an update, name the old and the new version. Say that a new conversation loads the kit's hooks. Change nothing else (no app, no `AGENTS.md`, no `git init`) unless the user asks.

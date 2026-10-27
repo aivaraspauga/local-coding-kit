@@ -85,6 +85,7 @@ const ASK = [
   [/\b(rd|rmdir)\s+\/s\b/i, "Recursive delete."],
   // The same from a script: refused `rmdir /S .claude`, the 27B ran `node -e "fs.rmSync('.claude',{recursive:true})"`.
   [/\b(rmSync|rmdirSync|rm|rmdir)\s*\([^)]*recursive\s*:\s*true|\bshutil\.rmtree\b/, "Recursive delete."],
+  [/kit[\\/]scripts[\\/]remove\.mjs\b/i, "Removes the coding kit from this project."],
   [/\bgit\s+reset\s+--hard\b/, "Discards uncommitted work."],
   [/\bgit\s+clean\b.*\s-\w*f/, "Deletes untracked files."],
   [/\bgit\s+(checkout|restore)\b.*\s(--\s+)?\.(\s|$)/, "Discards uncommitted work."],
