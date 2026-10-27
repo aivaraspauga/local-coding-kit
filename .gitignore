@@ -14,11 +14,9 @@ node_modules/
 launcher/models.generated.ini
 __pycache__/
 
-# The chat assistant (Open WebUI, images, personal skills) stays on this PC: the repo is the coding kit only
-assistant/
-docs/assistant-guide.md
-launcher/assistant.cmd
 1-copy-into-project.zip
 
-# Personal extras that start-all.cmd calls when present
+# Personal extras that the launcher scripts use when present
 launcher/start-extra.cmd
+launcher/server-extra.cmd
+launcher/status-extra.mjs

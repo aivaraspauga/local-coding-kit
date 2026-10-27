@@ -4,23 +4,18 @@
 //   node launcher/status.mjs --speed   (start-all: also times one short answer of the loaded model)
 //
 // Settings (environment, as in config.cmd): LOCAL_AGENT_URL, LLAMA_MODEL_ID,
-// LOCAL_AGENT_SEARXNG_URL, COMFYUI_URL, GATE_URL, OPEN_WEBUI_URL, LIBRARY_URL, LOCAL_AGENT_MIN_TPS. Exit code 1
+// LOCAL_AGENT_SEARXNG_URL, LOCAL_AGENT_MIN_TPS. Exit code 1
 // when the model server, which everything needs, is not answering.
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)));
 const env = (name, fallback) => process.env[name] || fallback;
 const MODEL_URL = env("LOCAL_AGENT_URL", "http://127.0.0.1:8080").replace(/\/$/, "");
 const MODEL_ID = env("LLAMA_MODEL_ID", "qwen3.8-27b");
 const SEARXNG_URL = env("LOCAL_AGENT_SEARXNG_URL", "http://127.0.0.1:8888").replace(/\/$/, "");
-const COMFYUI_URL = env("COMFYUI_URL", "http://127.0.0.1:8188").replace(/\/$/, "");
-const GATE_URL = env("GATE_URL", "http://127.0.0.1:8189").replace(/\/$/, "");
-const OPEN_WEBUI_URL = env("OPEN_WEBUI_URL", "http://127.0.0.1:3000").replace(/\/$/, "");
-const LIBRARY_URL = env("LIBRARY_URL", "http://127.0.0.1:8190").replace(/\/$/, "");
-const KIWIX_URL = env("KIWIX_URL", "http://127.0.0.1:8191").replace(/\/$/, "");
 // Below this, part of the model is almost surely in normal RAM (healthy: ~45-70 tok/s; spilled: 0.5-25).
 const MIN_TPS = Number(env("LOCAL_AGENT_MIN_TPS", "35"));
 
@@ -36,10 +31,6 @@ async function get(url) {
 
 const rows = [];
 const add = (state, name, detail) => rows.push({ state, name, detail });
-// The chat assistant's parts (images, library, Open WebUI) are listed as OFF only where the assistant
-// folder exists; a coding-only copy of the kit lists them only when they answer.
-const hasAssistant = existsSync(join(kit, "assistant"));
-const off = (name, detail) => hasAssistant && add("OFF", name, detail);
 
 // The model server: the one part everything needs.
 const models = await get(`${MODEL_URL}/models`);
@@ -54,7 +45,7 @@ if (!models) {
     list = [];
   }
   const entry = list.find((m) => m.id === MODEL_ID);
-  // With a second (chat) model, the one on the card may be the other one.
+  // Another model of the router may be the one on the card.
   const other = list.find((m) => m.id !== MODEL_ID && m.status?.value && m.status.value !== "unloaded");
   const state = entry?.status?.value;
   if (!entry) {
@@ -67,7 +58,7 @@ if (!models) {
         : other
           ? `not loaded; ${other.id} is ${other.status.value === "loaded" ? "on the card" : other.status.value} (the next coding request swaps it back)`
           : state === "unloaded"
-            ? "not loaded (images had the card; the next request loads it)"
+            ? "not loaded (the next request loads it)"
             : (state ?? "state unknown");
     add("OK", "Model server", `${MODEL_ID} ${note}`);
   }
@@ -125,57 +116,10 @@ if (!searx) add("DOWN", "SearXNG", `no answer on ${SEARXNG_URL}. Start Docker De
 else if (searx.status === 403) add("WARN", "SearXNG", "answers, but its JSON output is off (setup guide step 6).");
 else add(searx.status === 200 ? "OK" : "WARN", "SearXNG", searx.status === 200 ? "web search answers" : `HTTP ${searx.status}`);
 
-// The gate's own /gate does not start ComfyUI; a gate without it (older) answers through ComfyUI.
-const gateInfo = await get(`${GATE_URL}/gate`);
-let startsComfyui = false;
-try {
-  startsComfyui = gateInfo?.status === 200 && JSON.parse(gateInfo.text).startsComfyui === true;
-} catch {
-  // not the gate's own answer
-}
-const comfy = await get(`${COMFYUI_URL}/system_stats`);
-if (comfy?.status === 200) add("OK", "ComfyUI", "images ready");
-else if (startsComfyui) add("OK", "ComfyUI", "closed while idle; the gate starts it for the next image (~25 s)");
-else off("ComfyUI", "not running (only needed for images: assistant\\start-comfyui.cmd)");
-
-const gate = startsComfyui ? gateInfo : await get(`${GATE_URL}/system_stats`);
-if (!gate) off("Image gate", "not running (starts with assistant\\start-comfyui.cmd)");
-else if (gate.status === 200) add("OK", "Image gate", "frees the graphics card before each image");
-else add("WARN", "Image gate", "running, but ComfyUI behind it is not answering");
-
-const library = await get(`${LIBRARY_URL}/health`);
-if (library?.status === 200) add("OK", "Offline library", `${LIBRARY_URL} (books and pictures for the chat)`);
-else off("Offline library", "not running (starts with start-all when the library folder exists)");
-const kiwix = await get(`${KIWIX_URL}/`);
-if (kiwix?.status === 200) add("OK", "Offline sites", `${KIWIX_URL} (Kiwix)`);
-else off("Offline sites", "not running (assistant\\library\\start-kiwix.cmd)");
-
-const webui = await get(`${OPEN_WEBUI_URL}/health`);
-if (webui?.status === 200) add("OK", "Open WebUI", OPEN_WEBUI_URL);
-else off("Open WebUI", "not running (assistant guide step 6; starts with Docker Desktop)");
-
-// The Word and PDF tools have no port on this PC; ask Docker. A coding-only copy has none.
-const compose = join(kit, "assistant", "docker-compose.yml");
-const ps = hasAssistant ? spawnSync("docker", ["compose", "-f", compose, "ps", "--format", "json"], { encoding: "utf8", timeout: 15000 }) : null;
-if (!ps) {
-  // no assistant: nothing to report
-} else if (ps.status !== 0) {
-  add("OFF", "Word/PDF tools", "Docker is not running, or the assistant is not set up");
-} else {
-  const lines = ps.stdout.trim().split("\n").filter(Boolean);
-  const services = lines.flatMap((line) => {
-    try {
-      const parsed = JSON.parse(line);
-      return Array.isArray(parsed) ? parsed : [parsed];
-    } catch {
-      return [];
-    }
-  });
-  for (const name of ["word", "pdf"]) {
-    const service = services.find((s) => s.Service === name);
-    add(service?.State === "running" ? "OK" : "OFF", `${name === "word" ? "Word" : "PDF"} tools`, service ? service.State : "not created (assistant guide step 6)");
-  }
-}
+// Your own rows (other services on this PC), if you have any: launcher/status-extra.mjs, whose
+// default export gets { add, get } and adds rows with add(state, name, detail).
+const extra = join(kit, "launcher", "status-extra.mjs");
+if (existsSync(extra)) await (await import(pathToFileURL(extra).href)).default({ add, get });
 
 const gpu = spawnSync("nvidia-smi", ["--query-gpu=memory.used,memory.total", "--format=csv,noheader"], { encoding: "utf8", timeout: 10000 });
 if (gpu.status === 0) {

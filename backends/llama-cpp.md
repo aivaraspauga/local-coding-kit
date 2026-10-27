@@ -1,6 +1,6 @@
 # The model server: llama.cpp with Qwen3.8-27B
 
-The kit uses one setup: the llama.cpp `llama-server` with [Qwen3.8-27B IQ4_XS](https://huggingface.co/jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller). The model file is 13.5 GB and fits a 16 GB graphics card. Claude Code connects directly to the server.
+The kit uses one setup: the llama.cpp `llama-server` with [Qwen3.8-27B IQ4_XS](https://huggingface.co/jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller). The model file is 13.5 GB and fits a 16 GB graphics card. Qwen Code connects directly to the server.
 
 > **NOTE:** We tested this on an RTX 5080 (16 GB). On a new computer, do the checklist at the end of this page when you start the server for the first time.
 
@@ -48,9 +48,9 @@ llama-server --models-preset launcher\models.generated.ini --models-max 1 --host
 | `chat-template-file` | The chat template of the model, with one correction. Some clients send hook notes as system messages during a conversation (Claude Code did). The original template refuses these messages ("System message must be at the beginning"), so each request failed. To change it, use `LLAMA_CHAT_TEMPLATE_FILE` (empty = the template of the model). |
 | `reasoning-budget = 8192` | Sets a limit for each thought. Without it, the model can think for a very long time. |
 | `reasoning-effort = medium` | The server sends this value to the chat template: `xhigh`, `medium` or `low`. See the text below this table. |
-| `temp = 0.7` | Qwen recommends 1.0. With 0.7, the model wrote approximately 30% fewer tokens and finished faster, with the same test result (2026-10-24, 1 run for each setting, see [findings](../docs/findings.md)). To change it, use `LLAMA_TEMP`. The chat model keeps 1.0. |
+| `temp = 0.7` | Qwen recommends 1.0. With 0.7, the model wrote approximately 30% fewer tokens and finished faster, with the same test result (2026-10-24, 1 run for each setting). To change it, use `LLAMA_TEMP`. |
 | `top-k`, `top-p`, `min-p` | The values that Qwen recommends ([model card](https://huggingface.co/Qwen/Qwen3.8-27B-FP8)). |
-| Router mode (`--models-preset`, `--models-max 1`) | Lets the model make the card free when images need it. The model comes back on the next question. |
+| Router mode (`--models-preset`, `--models-max 1`) | Another program can ask the server to make the card free (`POST /models/unload`). The model comes back on the next question. |
 
 **About `reasoning-effort`:**
 
@@ -105,21 +105,6 @@ Other programs also use card memory. RGB lighting apps can use approximately 1 G
 **CAUTION:** When the card is full, Windows does not show an error. It moves the remaining data into the usual RAM without a warning, and everything becomes much slower. `q4_0` is the only setting that fits. It still found 3 of 3 facts at the start of a 38K-token prompt.
 
 If you have a 24 GB card, `set "LLAMA_KV_TYPE=q8_0"` in `config.cmd` is slightly more accurate.
-
-## A second model for chat (optional)
-
-You can add a second model only for chat in Open WebUI, for example a version that refuses fewer requests. Coding keeps the main model. Add these lines to `config.cmd`:
-
-```bat
-set "LLAMA_CHAT_MODEL_ID=qwen-chat"
-set "LLAMA_CHAT_MODEL_FILE=C:\models\your-chat-model.gguf"
-```
-
-- **Only one model is on the card at a time.** When you select the chat model in Open WebUI, the server loads it (approximately 8 seconds). The next coding request loads the main model again.
-- **The chat model gets 64K of memory** (`LLAMA_CHAT_CONTEXT`). This is sufficient for chat. The smaller memory gives space for a file that is up to approximately 0.5 GB larger than the main model.
-- **Use a model that comes from the same Qwen3.8-27B,** so the same settings fit.
-- The image gate makes the card free from the model that is loaded, whichever model it is.
-- **Faster chat with MTP:** With a model file that has the MTP layer, add `set "LLAMA_CHAT_MTP=1"` and `set "LLAMA_CHAT_CONTEXT=32768"`. At 32K, a 16 GB card has space for MTP. We measured an uncensored Qwen3.8-27B MTP build (14.3 GB): **80 tok/s** in short chats and 66 tok/s with 19K tokens of history, not 52. MTP guesses 2 tokens ahead. With 1 token ahead, it was slower (69 / 64).
 
 ## Settings at the llama.cpp defaults (b11461)
 

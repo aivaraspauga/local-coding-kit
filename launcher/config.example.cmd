@@ -14,14 +14,6 @@ rem Keep LLAMA_PORT matching the port in LOCAL_AGENT_URL.
 rem set "LLAMA_PORT=8080"
 rem Extra llama-server flags, e.g. a presence penalty if the model repeats itself:
 rem set "LLAMA_EXTRA=--presence-penalty 1.0"
-rem Optional second model for chat in Open WebUI, with a smaller context so a slightly bigger file
-rem still fits the card. Coding keeps the model above. See backends\llama-cpp.md.
-rem set "LLAMA_CHAT_MODEL_ID=qwen-chat"
-rem set "LLAMA_CHAT_MODEL_FILE=C:\models\your-chat-model.gguf"
-rem set "LLAMA_CHAT_CONTEXT=65536"
-rem Faster chat (MTP), only with a chat model file that has the MTP layer, and 32K context:
-rem set "LLAMA_CHAT_MTP=1"
-rem set "LLAMA_CHAT_CONTEXT=32768"
 
 rem Where your SearXNG answers, for launcher\status.cmd (docs\web-search.md).
 rem set "LOCAL_AGENT_SEARXNG_URL=http://127.0.0.1:8888"

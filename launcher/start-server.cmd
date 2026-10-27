@@ -1,7 +1,7 @@
 @echo off
 rem Starts llama.cpp's llama-server in router mode with Qwen3.8-27B (IQ4_XS, 13.5 GB), the way this kit
 rem expects. Router mode loads the model on the first request and can unload it on request
-rem (POST /models/unload), so ComfyUI can borrow the graphics card for images.
+rem (POST /models/unload), so another program can borrow the graphics card.
 rem start-all.cmd runs this when no server answers; you can also start it by hand.
 rem What each setting does: backends\llama-cpp.md. Overrides go in config.cmd next to this file.
 setlocal
@@ -9,7 +9,7 @@ set "HERE=%~dp0"
 
 rem Defaults; config.cmd overrides them.
 set "LLAMA_SERVER=llama-server"
-rem The name clients use for the model (Qwen Code, Open WebUI). Keep it in step with LOCAL_AGENT_MODEL.
+rem The name clients use for the model (Qwen Code). Keep it in step with LOCAL_AGENT_MODEL.
 set "LLAMA_MODEL_ID=qwen3.8-27b"
 rem A Hugging Face reference (downloaded once, then cached), or set LLAMA_MODEL_FILE to a local .gguf.
 set "LLAMA_MODEL=jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller:IQ4_XS"
@@ -30,7 +30,6 @@ rem prompt and make the server re-read all of it.
 set "LLAMA_REASONING_EFFORT=medium"
 rem Sampling temperature for the coding model (Qwen's card: 1.0). 0.7 measured 2026-10-24 on the q1
 rem price-quote task with the kit: 17 vs 24 min, ~30% fewer tokens, same hidden score (1 run each).
-rem The chat model below keeps 1.0 (not measured).
 set "LLAMA_TEMP=0.7"
 rem 1 = n-gram speculative decoding for the coding model: it guesses the next tokens from text already
 rem in the conversation (code it read, an Edit's old_string, a file it rewrites) and the model checks
@@ -57,23 +56,15 @@ rem (Claude Code did) send hook context that way, so every request would fail.
 rem This copy keeps such a message as a system turn instead. Empty = the model's own template.
 set "LLAMA_CHAT_TEMPLATE_FILE=%HERE%qwen3.8-chat-template.jinja"
 set "LLAMA_EXTRA="
-rem Optional second model for chat (Open WebUI), with its own, smaller context. Only one model is on
-rem the card at a time; the router swaps them when a request asks for the other. Set the ID and
-rem a file (or a Hugging Face reference in LLAMA_CHAT_MODEL) in config.cmd to turn it on.
-set "LLAMA_CHAT_MODEL_ID="
-set "LLAMA_CHAT_MODEL="
-set "LLAMA_CHAT_MODEL_FILE="
-set "LLAMA_CHAT_CONTEXT=65536"
-rem 1 = MTP (guess-ahead) for the chat model: faster writing, but only with a file that has the MTP
-rem layer and a context small enough to leave ~1 GB free (32768 on a 16 GB card).
-set "LLAMA_CHAT_MTP="
-rem Vision: a multimodal projector (.gguf named mmproj-...) for Qwen3.8-27B lets both models read
+rem Vision: a multimodal projector (.gguf named mmproj-...) for Qwen3.8-27B lets the model read
 rem images; without it llama-server answers "image input is not supported". It runs on the processor
 rem (~0.6 GB of normal RAM, a few seconds per image) because the card is full at these contexts.
 rem LLAMA_MMPROJ_GPU=1 puts it on the card instead (~0.6 GB more card memory).
 set "LLAMA_MMPROJ_FILE="
 set "LLAMA_MMPROJ_GPU="
 if exist "%HERE%config.cmd" call "%HERE%config.cmd"
+rem Your own additions to the preset file below (more models), if you have any.
+if exist "%HERE%server-extra.cmd" set "HAS_SERVER_EXTRA=1"
 
 rem Speculative decoding types for the coding model, as one comma-separated list.
 set "SPEC="
@@ -109,31 +100,7 @@ set "PRESET=%HERE%models.generated.ini"
   echo top-p = 0.95
   echo min-p = 0
   echo load-on-startup = true
-  if not "%LLAMA_CHAT_MODEL_ID%"=="" (
-    echo.
-    echo [%LLAMA_CHAT_MODEL_ID%]
-    if "%LLAMA_CHAT_MODEL_FILE%"=="" (echo hf-repo = %LLAMA_CHAT_MODEL%) else (echo model = %LLAMA_CHAT_MODEL_FILE%)
-    echo c = %LLAMA_CHAT_CONTEXT%
-    echo n-gpu-layers = 99
-    echo cache-type-k = %LLAMA_KV_TYPE%
-    echo cache-type-v = %LLAMA_KV_TYPE%
-    echo cache-ram = %LLAMA_CACHE_RAM%
-    echo ctx-checkpoints = %LLAMA_CTX_CHECKPOINTS%
-    echo ubatch-size = 256
-    echo parallel = 1
-    echo jinja = true
-    echo reasoning-budget = %LLAMA_THINKING_BUDGET%
-    if not "%LLAMA_MMPROJ_FILE%"=="" echo mmproj = %LLAMA_MMPROJ_FILE%
-    if not "%LLAMA_MMPROJ_FILE%"=="" if not "%LLAMA_MMPROJ_GPU%"=="1" echo mmproj-offload = false
-    echo temp = 1.0
-    echo top-k = 20
-    echo top-p = 0.95
-    echo min-p = 0
-    if "%LLAMA_CHAT_MTP%"=="1" (
-      echo spec-type = draft-mtp
-      echo spec-draft-n-max = 2
-    )
-  )
+  if defined HAS_SERVER_EXTRA call "%HERE%server-extra.cmd"
 )
 
 "%LLAMA_SERVER%" --models-preset "%PRESET%" --models-max 1 --host 127.0.0.1 --port %LLAMA_PORT% %LLAMA_EXTRA%

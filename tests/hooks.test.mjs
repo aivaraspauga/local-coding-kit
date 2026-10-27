@@ -1072,21 +1072,13 @@ describe("status", () => {
   test("reports each part, and why the ones that are not right are not", async () => {
     const model = await http((req, res) => json(res, 200, { data: [{ id: "qwen3.8-27b", status: { value: "unloaded" } }] }));
     const searx = await http((req, res) => json(res, 403, {}));
-    const comfy = await http((req, res) => json(res, 200, { system: {} }));
-    const gate = await http((req, res) => json(res, 502, {}));
-    const webui = await http((req, res) => json(res, 200, { status: true }));
     try {
-      const { code, out } = await runStatus({
-        LOCAL_AGENT_URL: url(model), LOCAL_AGENT_SEARXNG_URL: url(searx), COMFYUI_URL: url(comfy), GATE_URL: url(gate), OPEN_WEBUI_URL: url(webui),
-      });
+      const { code, out } = await runStatus({ LOCAL_AGENT_URL: url(model), LOCAL_AGENT_SEARXNG_URL: url(searx) });
       assert.equal(code, 0, out);
-      assert.match(out, /OK\s+Model server\s+qwen3\.8-27b not loaded \(images had the card/);
+      assert.match(out, /OK\s+Model server\s+qwen3\.8-27b not loaded \(the next request loads it/);
       assert.match(out, /WARN\s+SearXNG\s+answers, but its JSON output is off/);
-      assert.match(out, /OK\s+ComfyUI/);
-      assert.match(out, /WARN\s+Image gate\s+running, but ComfyUI behind it is not answering/);
-      assert.match(out, /OK\s+Open WebUI/);
     } finally {
-      for (const s of [model, searx, comfy, gate, webui]) s.close();
+      for (const s of [model, searx]) s.close();
     }
   });
 
