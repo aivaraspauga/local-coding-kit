@@ -57,7 +57,7 @@ None of this is needed for the kit.
 | Web search | My own [SearXNG](https://docs.searxng.org/) in Docker, through [mcp-searxng](https://github.com/ihor-sokoliuk/mcp-searxng) |
 | Speed | About 45-50 tokens per second |
 
-**Server settings:** context 100K, temperature 0.7, top-k 20, top-p 0.95, min-p 0, thinking limit 8192 tokens, reasoning effort medium, KV cache q4_0, cache-ram 0, ctx-checkpoints 4, parallel 1, n-gram guessing on, MTP off. Why each one: [backends/llama-cpp.md](backends/llama-cpp.md).
+**Server settings:** context 102400, temperature 0.7, top-k 20, top-p 0.95, min-p 0, thinking limit 8192 tokens, reasoning effort medium, KV cache q4_0, cache-ram 0, ctx-checkpoints 4, parallel 1, n-gram guessing on, MTP off. Why each one: [backends/llama-cpp.md](backends/llama-cpp.md).
 
 **Qwen Code settings** ([qwen-code/user-settings.json](qwen-code/user-settings.json)): context 102400, answer limit 24000 tokens, approval `auto-edit`, follow-up suggestions and managed memory off (each extra request slows the next answer), usage statistics off.
 
