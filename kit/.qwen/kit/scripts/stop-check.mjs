@@ -16,6 +16,7 @@ import { findRisks } from "./lib/risks.mjs";
 import {
   changedFiles,
   checkCommand,
+  fileSignatures,
   fingerprint,
   output,
   PLAN_FILE,
@@ -27,6 +28,8 @@ import {
 } from "./lib/project.mjs";
 
 const MAX_BLOCKS = 3;
+// Files that hold notes for the agent or the tools, not code.
+const NOTES_ONLY = /^(QWEN|AGENTS|CLAUDE)\.md$|^\.(gitignore|prettierignore)$/;
 const MAX_PLAN_STEPS_SHOWN = 6;
 // Type, lint and build errors fail the same way every time, so a second run only doubles the wait.
 // Only a test failure can be flaky.
@@ -129,6 +132,16 @@ function finish(message) {
 }
 
 if (!command) finish(null);
+// A kit setup, update or removal, or a lesson in AGENTS.md, changes no code, so the checks would
+// only repeat the last result: a removal ran typecheck, lint, tests and the build (2026-10-28).
+if (state.startFiles) {
+  const files = fileSignatures(root);
+  const touched = [
+    ...Object.keys(files).filter((path) => state.startFiles[path] !== files[path]),
+    ...Object.keys(state.startFiles).filter((path) => !(path in files)),
+  ];
+  if (touched.length > 0 && touched.every((path) => NOTES_ONLY.test(path))) finish(null);
+}
 // The model's own passing run of this command on these same files (recorded by focus.mjs) counts:
 // a benchmark run spent 20-60 s per task repeating it here. Any change since then means a new run.
 if (now === state.modelPassed) finish(`Checks passed (\`${command}\`, your own run on these same files)`);

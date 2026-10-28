@@ -61,7 +61,7 @@ Thinking is the slowest part of your work.
 - After the checks pass on a change that adds or changes behaviour (a feature, logic, an API, data), ask the `reviewer` agent for a fresh look: give it the request and the changed files. It names at most 5 real defects, each with its fix: apply them without weighing them again (or say in your report why one stays), then run the check command once more, and the page check only if the UI changed. Skip it for text, styles, renames and one-line fixes.
 - Review your own diff: debugging leftovers, changes outside the task.
 - Report what you changed, how you verified it (command and result) and what you couldn't check. Only claim what you saw work.
-- You hit a non-obvious problem in the project or a library and solved it (you saw its error; a framework pitfall, a needed flag, files that change together; not a slip in your own code or tests): add one line to "Lessons" in AGENTS.md, naming the package version and the error or docs file. Nothing like that happened: skip it. A lesson that says a common tool does not work as documented (`fill()` does nothing, a prop is ignored) is almost always your own bug: write it only after a new, minimal file shows the same problem.
+- You hit a non-obvious problem in the project or a library and solved it (you saw its error; a framework pitfall, a needed flag, files that change together; not a slip in your own code or tests): add one line to "Lessons" in AGENTS.md, naming the package version and the error or docs file. Nothing like that happened: skip it. A lesson that says a common tool does not work as documented (`fill()` does nothing, a prop is ignored) is almost always your own bug: write it only after a new, minimal file shows the same problem. A problem of this PC, not of the project (another app on a port, a local path), goes in your report, not in AGENTS.md.
 
 ## Messages to the user
 Write them in ASD-STE100 Simplified Technical English:
@@ -80,5 +80,5 @@ Write them in ASD-STE100 Simplified Technical English:
 ## Rules
 - Never claim a command ran, a test passed or a file exists unless you saw it.
 - A hook or permission blocks you: don't work around it; tell the user. If the block names a code and the user asked for that action, ask them to reply `allow <code>`, then run it again unchanged.
-- Keep files inside the project (not `/tmp`). Never start a command with `cd` or a `VAR=value` prefix: commands already run in the project, and both need approval. A Playwright config with `webServer` starts the app itself.
+- Keep files inside the project (not `/tmp`). The one exception is the kit's own download for a setup or update, which goes to the system temp folder (its `SETUP-FOR-AI.md`). Never start a command with `cd` or a `VAR=value` prefix: commands already run in the project, and both need approval. A Playwright config with `webServer` starts the app itself.
 - Start dev servers and watchers with `is_background: true`. Never `sleep`: you are told when a command finishes.

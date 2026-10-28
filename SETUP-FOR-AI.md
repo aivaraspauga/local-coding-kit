@@ -8,7 +8,7 @@ The user asked you to add this kit to their project. The kit is for Qwen Code. D
 git clone --depth 1 <repo link> "<temp>/local-coding-kit"
 ```
 
-`<temp>` is the system temp folder (`$env:TEMP` in PowerShell, `%TEMP%` in cmd, `/tmp` elsewhere). Never clone into the project. No git? Download `<repo link>/archive/refs/heads/main.zip` and unpack it there. Already downloaded it to read this file? Use that copy and go on.
+`<temp>` is the system temp folder (`$env:TEMP` in PowerShell, `%TEMP%` in cmd, `/tmp` elsewhere). Never clone into the project, also not when the kit's rules in the project say to keep files inside it: this download is the exception. No git? Download `<repo link>/archive/refs/heads/main.zip` and unpack it there. Already downloaded it to read this file? Use that copy and go on.
 
 ## 2. Copy the kit into the project
 
@@ -16,9 +16,9 @@ git clone --depth 1 <repo link> "<temp>/local-coding-kit"
 node "<temp>/local-coding-kit/copy-kit.mjs"
 ```
 
-It copies `.qwen/` (rules, skills, helper agents, hooks) and `QWEN.md`, never overwrites a file the project already has, and prints the files it kept as they were. It records what it added in `.qwen/kit/installed.json`, so the kit can be removed later without touching the project's files.
+It copies `.qwen/` (rules, skills, helper agents, hooks) and `QWEN.md`, never overwrites a file the project already has, and prints the files it kept as they were. It leaves out the framework skills the project's `package.json` does not use, and in a git repository it adds `.local-agent/` (the plan of the current task) to `.gitignore`. It records what it added in `.qwen/kit/installed.json`, so the kit can be removed later without touching the project's files.
 
-If the project already had `.qwen/kit/`, this was an update: it replaced the kit's files with the new version, except the ones the user changed, and printed the old and the new version number. Then do only "Merge each file it kept" and "The stack" in step 3, and go on to step 4.
+If the project already had `.qwen/kit/`, this was an update: it replaced the kit's files with the new version, except the ones the user changed, and printed the old and the new version number. Then do only "Merge each file it kept" in step 3, and go on to step 4.
 
 ## 3. Adapt it to the project
 
@@ -28,14 +28,6 @@ Keep everything the project has, and add what the kit has and the file lacks:
 
 - `.qwen/settings.json`: add the kit's `hooks` entries, its `permissions.allow` lines, its `env` keys and its `tools` and `skills` lists. On a conflict, keep the project's value and tell the user.
 - `QWEN.md`, `AGENTS.md`: add the kit's lines at the end.
-
-### The stack
-
-If the project has a `package.json`, delete the framework skills it does not use from `.qwen/skills/`: `react-nextjs`, `shadcn-ui` (only with `components.json`), `vue`, `angular`, `vanilla-web`. Keep all others. In an empty folder, keep all of them.
-
-### Git
-
-If the project is a git repository, add the line `.local-agent/` to `.gitignore` (create it if missing). The kit keeps the plan of the current task there.
 
 ### The checks
 
@@ -57,8 +49,8 @@ node -e "require('child_process').spawnSync('npx',['-y','mcp-searxng@2.5.0'],{in
 
 ## 4. Clean up
 
-Delete `<temp>/local-coding-kit`. Do not commit unless the user asks.
+Delete the download with one command that names only that folder, for example `Remove-Item -Recurse -Force "$env:TEMP\local-coding-kit"` in PowerShell or `rm -rf /tmp/local-coding-kit`. The kit's guard lets this delete through without asking. Do not commit unless the user asks.
 
 ## 5. Report
 
-Tell the user in a few lines what you copied, merged and deleted. On an update, name the old and the new version. Say that a new conversation loads the kit's hooks. Change nothing else (no app, no `AGENTS.md`, no `git init`) unless the user asks.
+Tell the user in a few lines what you copied, merged and left out. On an update, name the old and the new version. Say that a new conversation loads the kit's hooks. Change nothing else (no app, no `AGENTS.md`, no `git init`) unless the user asks.

@@ -1,8 +1,8 @@
 // UserPromptSubmit hook: re-adds a short checklist to every user message, because smaller models
 // lose track of long instructions as the conversation grows. Requests that look big or vague also
 // get a nudge to plan first. It also notes for the other hooks what only the user's own words can
-// say: blocks the user allows (guard.mjs), config files the message names (guard.mjs), and whether
-// the message only asks a question (focus.mjs).
+// say: blocks the user allows (guard.mjs), config files the message names (guard.mjs), whether the
+// user asked to remove the kit (guard.mjs), and whether the message only asks a question (focus.mjs).
 import { basename } from "node:path";
 
 import { CHECK_CONFIGS, output, projectRoot, readInput, readState, writeState } from "./lib/project.mjs";
@@ -35,7 +35,10 @@ const CHANGE =
   /\b(add|fix|build|create|make|implement|change|update|remove|delete|rename|refactor|write|move|install|set up|migrate|convert|replace|edit)\b/i;
 const QUESTION = /\?\s*$|^\s*(how|what|why|where|which|who|when|is|are|does|do|did|can|could|should|would|explain|review)\b/i;
 const question = QUESTION.test(prompt) && !CHANGE.test(prompt);
-writeState(root, input.session_id, { ...state, pending, allowed: [...allowed], named: [...named], question });
+// "Remove the coding kit from this project": the guard then lets the kit's own removal script run.
+// It stays for the conversation, since the model may first ask about changed files.
+const removeKit = Boolean(state.removeKit) || /\b(remove|uninstall|delete|take out|get rid of)\b[^.?!\n]{0,40}\bkit\b/i.test(prompt);
+writeState(root, input.session_id, { ...state, pending, allowed: [...allowed], named: [...named], question, removeKit });
 
 // Signs of a request that needs a plan: building a whole new app or system, or several asks or a
 // long description that doesn't yet say what exactly to build. One page or component ("add a

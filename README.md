@@ -25,11 +25,11 @@ The cost: the model takes longer to finish.
 1. Open the project folder in VS Code: a project you already have, or a new, empty folder.
 2. In the Qwen Code chat, write:
 
-   > Download https://github.com/aivaraspauga/local-coding-kit into a temporary folder and follow its SETUP-FOR-AI.md to set it up in this project.
+   > Download https://github.com/aivaraspauga/local-coding-kit into the system temp folder (not into this project) and follow its SETUP-FOR-AI.md to set it up in this project.
 
 3. Start a new chat (it loads the kit) and give it your task.
 
-The kit never overwrites your files and does not change your code. It adds `.qwen/` and `QWEN.md`, and adds its lines to the `.qwen/settings.json`, `QWEN.md` or `AGENTS.md` you already have.
+The kit never overwrites your files and does not change your code. It adds `.qwen/` and `QWEN.md` (in a git repository also a `.local-agent/` line in `.gitignore`), and adds its lines to the `.qwen/settings.json`, `QWEN.md` or `AGENTS.md` you already have.
 
 **Tips** for the best results (small tasks, plans, the helper agents, `allow <code>`): [docs/usage.md](docs/usage.md).
 
@@ -46,6 +46,35 @@ To update the kit later, ask the same thing again. Qwen tells you the old and th
 
 It deletes only what the kit added. Your code, your own Qwen Code settings and skills, and any kit file you changed stay. Qwen tells you which files it left. Your Qwen Code user settings (`~/.qwen/settings.json`) stay too, because they are for all your projects.
 
+## Test results (2026-10-28)
+
+**Kit or no kit: one run per task, so these are examples, not proof.**
+
+- **Setup:** the model and settings under "My setup". The Qwen Code panel in VS Code, in Full Access (YOLO) mode.
+- **The app:** each run started from a fresh copy of the same small Next.js app (SQLite, API routes, Vitest, Playwright). One copy had the kit, one did not. Both got exactly the same prompt.
+- **How I judged it:** no hidden tests. I read every change, ran the app's own checks, and sent requests to each new API by hand.
+
+| Task | Without the kit | With the kit |
+| --- | --- | --- |
+| 1. A "Clear finished" button with a confirmation | 24.9 min, 93 tool calls. Works. Server, component and e2e tests. | 13.1 min, 39 tool calls. Works. A cleaner API route, but only an e2e test. |
+| 2. Bug: new and ticked tasks show in the wrong place until a reload | 2.5 min. Fixed, with 3 component tests. | 13.8 min. The same fix, with component and e2e tests. |
+| 3. Create a project from the home page (required, max. 80 characters, no duplicate names in any letter case) | 14.2 min. Works. Invalid JSON gets a 500 error, not a 400. | 17.3 min. Works. Safer: a unique index and no double submit. Its reviewer found and fixed 4 defects. **One bug left:** each duplicate after the first gets an empty 409 response (one shared `Response` object). A name with spaces around it is length-checked before the spaces are cut. |
+
+- **Checks:** all six results pass the app's type check, lint, unit tests, build and e2e tests.
+- **Letter case:** in both versions of task 3, the server's duplicate check folds only A-Z (SQLite `lower()`). So "Žalias" and "žalias" both get in through the API. Only the kit's run said so.
+- **What this shows:** in this round the kit did not make the code clearly better. It was faster on one task and much slower on a one-line bug fix. Its run made the only real bug, but its reviewer caught real defects.
+- **Disturbances:** another app on port 3000 broke the first e2e run in both. One kit run lost time to an old build file that my reset between tasks left behind.
+
+**Setup, update and removal** were tested in the same panel with the same model. All three ended with the right files. Kit version 2026-10-28 fixes what the test found:
+
+- **An update cloned the kit into the project.** A kit rule said to keep files inside the project. Now that rule, `QWEN.md` and the setup prompt name the temp folder.
+- **The kit's own guard stopped its setup and removal steps for `allow` codes** (4 in all). Now `copy-kit.mjs` leaves out the unused framework skills and writes the `.gitignore` line itself, and `remove.mjs` does the whole removal. The guard lets two things through: the removal script, after you ask for a removal, and the delete of the kit's download in the temp folder.
+- **The removal left `.prettierignore` behind.** Now it takes the kit's line out.
+- **After a setup or removal, the full checks ran** (type check, lint, tests, build), only for changed notes files. Now they are skipped when only `QWEN.md`, `AGENTS.md`, `.gitignore` or `.prettierignore` changed.
+- **A run wrote a note about this PC** (another app on a port) into the project's `AGENTS.md`. Now the rule says that such notes go in the report.
+
+These fixes have automated tests. They were not run again with the model yet.
+
 ## My setup
 
 None of this is needed for the kit.
@@ -53,9 +82,9 @@ None of this is needed for the kit.
 | | |
 | --- | --- |
 | PC | AMD Ryzen 7 9800X3D, 32 GB RAM, NVIDIA RTX 5080 16 GB, Windows 11 |
-| Harness | Qwen Code 0.26.1 in VS Code ("Qwen Code Companion" extension) |
+| Harness | Qwen Code 0.26.2 in VS Code ("Qwen Code Companion" extension) |
 | Model | [Qwen3.8-27B IQ4_XS](https://huggingface.co/jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller), 13.5 GB |
-| Model server | [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server`, build 11461, started by my Windows scripts in `launcher/` |
+| Model server | [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server`, build 11946, started by my Windows scripts in `launcher/` |
 | Web search | My own [SearXNG](https://docs.searxng.org/) in Docker, through [mcp-searxng](https://github.com/ihor-sokoliuk/mcp-searxng) |
 | Speed | About 45-50 tokens per second |
 

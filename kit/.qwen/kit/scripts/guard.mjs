@@ -6,6 +6,7 @@
 // refusal, so without this an approved deletion could not run at all (2026-10-27).
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -94,6 +95,30 @@ const ASK = [
   [/\b(prisma\s+migrate\s+reset|drizzle-kit\s+drop|DROP\s+(TABLE|DATABASE))\b/i, "Deletes data."],
 ];
 
+// The kit's own steps, which the asks above would stop for an allow code (an update and a removal
+// each needed two, 2026-10-28): the removal script once the user asked to remove the kit
+// (reminder.mjs notes it), and deleting the kit's download in the temp folder at the end of a setup
+// or update (SETUP-FOR-AI.md step 4), with nothing else in the command.
+const REMOVE_KIT = /^\s*node\s+["']?(\.\/)?\.qwen[\\/]kit[\\/]scripts[\\/]remove\.mjs["']?\s*$/i;
+const TEMP_VARS = /^(%TEMP%|%TMP%|\$env:TEMP|\$env:TMP|\$TEMP|\$TMPDIR)(?=[\\/])/i;
+function deletesOnlyKitDownload(command) {
+  const words = command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  const [verb, ...rest] = words;
+  if (!/^(rm|rmdir|rd|Remove-Item)$/i.test(verb ?? "")) return false;
+  const paths = rest.filter((word) => !/^(-[\w-]+|\/[a-z])$/i.test(word));
+  const download = resolve(tmpdir(), "local-coding-kit").replaceAll("\\", "/").toLowerCase();
+  return (
+    paths.length > 0 &&
+    paths.every((word) => {
+      const path = word.replace(/^(["'])(.*)\1$/, "$2");
+      // Any other shell syntax (`;`, `&&`, a `$(...)`, a wildcard) makes it something else.
+      if (/[;&|<>`*?]|\$(?!env:te?mp|temp|tmpdir)/i.test(path)) return false;
+      const full = path.replace(TEMP_VARS, tmpdir()).replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+      return full === download || full === "/tmp/local-coding-kit";
+    })
+  );
+}
+
 function decide(decision, reason) {
   output({
     hookSpecificOutput: {
@@ -143,6 +168,7 @@ if (tool === "Bash") {
       "A dev server never exits, so in the foreground it blocks until the command times out. Run it again with is_background: true; its output is kept for you to read. Next.js allows one dev server per project: if one is already running, use it instead of starting another, and stop it when you are done.",
     );
   }
+  if ((state.removeKit && REMOVE_KIT.test(command)) || deletesOnlyKitDownload(command)) process.exit(0);
   for (const [pattern, reason] of ASK) if (pattern.test(command)) block("ask", reason, key);
 } else if (tool === "Edit" || tool === "Write") {
   const target = resolve(root, String(params.file_path ?? ""));

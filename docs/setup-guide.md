@@ -161,7 +161,7 @@ You can let the AI add them: the first time you set up the kit in a project (ste
 2. Click the Qwen icon and start a **new conversation**. If Qwen Code asks if you trust the folder, answer yes.
 3. Type:
 
-   > Download https://github.com/aivaraspauga/local-coding-kit into a temporary folder and follow its SETUP-FOR-AI.md to set it up in this project.
+   > Download https://github.com/aivaraspauga/local-coding-kit into the system temp folder (not into this project) and follow its SETUP-FOR-AI.md to set it up in this project.
 
    The AI copies the kit into the project, fits it to the project and removes the download. It never overwrites a file the project already has.
 4. Start a **new conversation**. This loads the kit's hooks. Then type a request.
@@ -210,7 +210,7 @@ To remove the kit from a project, ask the AI: *"Remove the coding kit from this 
 
 ## Update
 
-- **The kit in a project:** Ask the AI the same as in step 8: *"Download https://github.com/aivaraspauga/local-coding-kit into a temporary folder and follow its SETUP-FOR-AI.md to update the kit in this project."* It replaces the kit's files, keeps your settings and the files you changed, and tells you the old and the new version. Then start a new conversation.
+- **The kit in a project:** Ask the AI the same as in step 8: *"Download https://github.com/aivaraspauga/local-coding-kit into the system temp folder (not into this project) and follow its SETUP-FOR-AI.md to update the kit in this project."* It replaces the kit's files, keeps your settings and the files you changed, and tells you the old and the new version. Then start a new conversation.
 - **llama.cpp:** Close the server window and do step 2 again.
 - **SearXNG:** Run `docker pull searxng/searxng` and `docker rm -f searxng`. Then run the `docker run` line from step 6. Your settings stay.
 

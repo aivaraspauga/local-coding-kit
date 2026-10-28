@@ -160,6 +160,16 @@ describe("guard", () => {
     ["run_shell_command", { command: `node -e "require('fs').writeFileSync('.qwen/settings.json','{}')"` }, "ask"],
     ["run_shell_command", { command: `node -e "require('fs').writeFileSync(require('os').tmpdir()+'/local-coding-agent/x.json','{}')"` }, "ask"],
     ["run_shell_command", { command: `node -e "require('fs').writeFileSync('notes.txt','x')"` }, "allow"],
+    // The kit's download in the temp folder, deleted at the end of a setup or update, and nothing more.
+    ["run_shell_command", { command: 'Remove-Item -Recurse -Force "$env:TEMP\\local-coding-kit"' }, "allow"],
+    ["run_shell_command", { command: "rmdir /s /q %TEMP%\\local-coding-kit" }, "allow"],
+    ["run_shell_command", { command: `rd /s /q "${join(tmpdir(), "local-coding-kit")}\\"` }, "allow"],
+    ["Bash", { command: "rm -rf /tmp/local-coding-kit" }, "allow"],
+    ["Bash", { command: "rm -rf /tmp/local-coding-kit src" }, "ask"],
+    ["Bash", { command: "rm -rf /tmp/local-coding-kit && rm -rf src" }, "ask"],
+    ["Bash", { command: "rm -rf /tmp/local-coding-kit/../.." }, "ask"],
+    ["Bash", { command: "rm -rf /tmp/local-coding-kit*" }, "ask"],
+    ["Bash", { command: "rm -rf local-coding-kit" }, "ask"],
   ];
   for (const [tool, params, want] of cases) {
     test(`${want}: ${tool} ${params.command ?? params.file_path}`, () => {
@@ -229,6 +239,23 @@ describe("guard", () => {
     const fileCode = /allow ([0-9a-f]{4})/.exec(edit().permissionDecisionReason)[1];
     hook("reminder.mjs", { session_id: session, prompt: `allow ${fileCode}` }, { project: dir });
     assert.equal(edit(), undefined);
+  });
+  test("the kit's removal script runs without a code once the user asked to remove the kit", () => {
+    // A removal stopped twice for allow codes: the settings edit and remove.mjs (2026-10-28).
+    const dir = tempProject({ scripts: {} });
+    const session = `remove-${process.pid}-${Date.now()}`;
+    const guard = (command, id = session) =>
+      hook("guard.mjs", { session_id: id, tool_name: "run_shell_command", tool_input: { command } }, { project: dir }).json
+        ?.hookSpecificOutput?.permissionDecision ?? "allow";
+    assert.equal(guard("node .qwen/kit/scripts/remove.mjs"), "ask", "nobody asked yet");
+    hook("reminder.mjs", { session_id: session, prompt: "Fix the delete button on the task page." }, { project: dir });
+    assert.equal(guard("node .qwen/kit/scripts/remove.mjs"), "ask", "a message about something else");
+    hook("reminder.mjs", { session_id: session, prompt: "Remove the coding kit from this project." }, { project: dir });
+    assert.equal(guard("node .qwen/kit/scripts/remove.mjs"), "allow");
+    hook("reminder.mjs", { session_id: session, prompt: "Keep it" }, { project: dir });
+    assert.equal(guard("node .qwen/kit/scripts/remove.mjs"), "allow", "for the rest of the conversation");
+    assert.equal(guard("node .qwen/kit/scripts/remove.mjs && rm -rf src"), "ask", "nothing more in the command");
+    assert.equal(guard("node .qwen/kit/scripts/remove.mjs", `${session}-other`), "ask", "another conversation");
   });
 });
 
@@ -587,6 +614,26 @@ describe("stop-check", () => {
     assert.equal(runs("✖ 2 problems (2 errors, 0 warnings)"), 1);
     assert.equal(runs("Failed to compile.\n./src/app/page.tsx"), 1);
     assert.equal(runs(" Tests  1 failed | 4 passed (5)"), 2);
+  });
+  test("skips the checks when only notes changed (a kit setup or removal, an AGENTS.md lesson)", () => {
+    // A removal ran typecheck, lint, tests and the build for QWEN.md and .gitignore (2026-10-28).
+    const project = tempProject(
+      { scripts: { check: 'node -e "require(\'fs\').appendFileSync(\'runs.txt\',\'x\');process.exit(1)"' } },
+      { "QWEN.md": "kit\n", ".gitignore": "node_modules\n", "src/a.ts": "export const a = 1;\n" },
+    );
+    const session = `notes-${process.pid}-${Date.now()}`;
+    hook("session-start.mjs", { session_id: session, source: "startup" }, { project, env: { LOCAL_AGENT_OFFLINE: "1" } });
+    rmSync(join(project, "QWEN.md"));
+    writeFileSync(join(project, ".gitignore"), "node_modules\n.local-agent/\n");
+    assert.equal(hook("stop-check.mjs", { session_id: session }, { project }).code, 0);
+    // A new lesson still gets its one review, without a check run.
+    writeFileSync(join(project, "AGENTS.md"), "## Lessons\n");
+    const lesson = hook("stop-check.mjs", { session_id: session }, { project });
+    assert.match(lesson.stderr, /AGENTS\.md: changed/);
+    assert.doesNotMatch(lesson.stderr, /checks failed/);
+    assert.ok(!existsSync(join(project, "runs.txt")), "the check did not run");
+    writeFileSync(join(project, "src/a.ts"), "export const a = 2;\n");
+    assert.equal(hook("stop-check.mjs", { session_id: session }, { project }).code, 2, "a code change is checked");
   });
   test("a second chat in the same project does not hide the first chat's changes", () => {
     // One state file per project let chat B's start overwrite chat A's (2026-10-27).
@@ -1229,6 +1276,7 @@ describe("SETUP-FOR-AI.md and the kit's removal", () => {
     writeFileSync(join(dir, ".qwen/kit/VERSION"), "2026-01-01\n");
     writeFileSync(join(dir, ".qwen/settings.json"), "{}\n");
     writeFileSync(join(dir, ".qwen/skills/debug/SKILL.md"), "my own steps\n");
+    // A folder without package.json gets every framework skill, on an update too.
     rmSync(join(dir, ".qwen/skills/vue"), { recursive: true });
     // An older kit file nobody changed: its hash in the record matches.
     writeFileSync(join(dir, ".qwen/agents/reviewer.md"), "an older version\n");
@@ -1244,7 +1292,7 @@ describe("SETUP-FOR-AI.md and the kit's removal", () => {
     assert.equal(read(dir, ".qwen/agents/reviewer.md"), read(source, ".qwen/agents/reviewer.md"));
     assert.equal(read(dir, ".qwen/settings.json"), "{}\n");
     assert.equal(read(dir, ".qwen/skills/debug/SKILL.md"), "my own steps\n");
-    assert.ok(existsSync(join(dir, ".qwen/skills/vue/SKILL.md")), "a skill the setup dropped comes back (step 3 drops it again)");
+    assert.ok(existsSync(join(dir, ".qwen/skills/vue/SKILL.md")), "no package.json: every framework skill");
     // A kit from before the record: everything in its folders counts as the kit's.
     const old = tempProject(null);
     copy(old);
@@ -1256,11 +1304,85 @@ describe("SETUP-FOR-AI.md and the kit's removal", () => {
     assert.ok(existsSync(join(old, ".qwen/kit/installed.json")));
   });
 
+  test("leaves out the framework skills the project does not use, also on an update", () => {
+    // The model deleted them with a recursive delete, which the kit's guard stopped on an update (2026-10-28).
+    const skills = (dir) => readdirSync(join(dir, ".qwen/skills")).filter((n) => /^(react-nextjs|shadcn-ui|vue|angular|vanilla-web)$/.test(n)).sort();
+    const next = tempProject({ dependencies: { next: "16", react: "19" } });
+    const out = copy(next);
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /Left out the framework skills this project does not use: angular, shadcn-ui, vanilla-web, vue$/m);
+    assert.deepEqual(skills(next), ["react-nextjs"]);
+    writeFileSync(join(next, ".qwen/kit/VERSION"), "2026-01-01\n");
+    assert.equal(copy(next).status, 0);
+    assert.deepEqual(skills(next), ["react-nextjs"], "an update does not bring them back");
+    const nuxt = tempProject({ dependencies: { nuxt: "4" } });
+    copy(nuxt);
+    assert.deepEqual(skills(nuxt), ["vue"]);
+    const shadcn = tempProject({ dependencies: { next: "16" } }, { "components.json": "{}" });
+    copy(shadcn);
+    assert.deepEqual(skills(shadcn), ["react-nextjs", "shadcn-ui"]);
+    const plain = tempProject({ devDependencies: { typescript: "5", vite: "7" } });
+    copy(plain);
+    assert.deepEqual(skills(plain), ["vanilla-web"]);
+    // One the project has already stays and is updated like any other kit file.
+    const kept = tempProject({ dependencies: { next: "16" } }, { ".qwen/skills/vue/SKILL.md": "my vue notes\n" });
+    copy(kept);
+    assert.equal(read(kept, ".qwen/skills/vue/SKILL.md"), "my vue notes\n");
+  });
+
+  test("adds .local-agent/ to .gitignore in a git repository, once", () => {
+    const repo = tempProject(null, { ".git/HEAD": "ref: refs/heads/main\n", ".gitignore": "node_modules" });
+    assert.match(copy(repo).stdout, /Added \.local-agent\/ .* to \.gitignore/);
+    copy(repo);
+    assert.equal(read(repo, ".gitignore"), "node_modules\n\n# Qwen Code kit: the plan of the current task\n.local-agent/\n");
+    const fresh = tempProject(null, { ".git/HEAD": "ref: refs/heads/main\n" });
+    copy(fresh);
+    assert.equal(read(fresh, ".gitignore"), "# Qwen Code kit: the plan of the current task\n.local-agent/\n");
+    const noGit = tempProject(null);
+    copy(noGit);
+    assert.ok(!existsSync(join(noGit, ".gitignore")));
+  });
+
+  test("the removal takes the kit's parts out of the shared files and its ignore lines, and keeps the user's", () => {
+    // The model edited these by hand, the guard asked twice, and .prettierignore was left (2026-10-28).
+    const dir = tempProject(
+      { dependencies: { next: "16" }, devDependencies: { prettier: "3" } },
+      { ".git/HEAD": "ref: refs/heads/main\n", ".gitignore": "node_modules\n", ".prettierignore": "build/\n", "QWEN.md": "- My own rule.\n" },
+    );
+    copy(dir);
+    // What the setup's merge step and the kit's session start leave behind.
+    writeFileSync(join(dir, "QWEN.md"), `- My own rule.\n\n${read(source, "QWEN.md")}`);
+    const settings = JSON.parse(read(dir, ".qwen/settings.json"));
+    settings.env.MY_OWN = "1";
+    settings.permissions.allow.push("Bash(make *)");
+    settings.$version = 4;
+    writeFileSync(join(dir, ".qwen/settings.json"), JSON.stringify(settings, null, 2));
+    writeFileSync(join(dir, ".prettierignore"), "build/\n# Qwen Code kit (agent tooling, not app code)\n.qwen/\n");
+    mkdirSync(join(dir, ".local-agent"));
+    writeFileSync(join(dir, ".local-agent/plan.md"), "# Plan\n");
+    const out = remove(dir);
+    assert.equal(out.status, 0, out.stderr);
+    assert.equal(read(dir, "QWEN.md"), "- My own rule.\n");
+    assert.deepEqual(JSON.parse(read(dir, ".qwen/settings.json")), { env: { MY_OWN: "1" }, permissions: { allow: ["Bash(make *)"] }, $version: 4 });
+    assert.equal(read(dir, ".gitignore"), "node_modules\n");
+    assert.equal(read(dir, ".prettierignore"), "build/\n");
+    assert.ok(!existsSync(join(dir, ".local-agent")));
+    assert.match(out.stdout, /took the kit's settings out of \.qwen\/settings\.json and kept yours/);
+    // Only the kit's settings (and Qwen Code's own marker): the file goes. The user's own `.qwen/` ignore line stays.
+    const plain = tempProject(null, { ".prettierignore": ".qwen/\n" });
+    copy(plain);
+    const kitOnly = JSON.parse(read(plain, ".qwen/settings.json"));
+    writeFileSync(join(plain, ".qwen/settings.json"), JSON.stringify({ ...kitOnly, $version: 4 }));
+    assert.equal(remove(plain).status, 0);
+    assert.ok(!existsSync(join(plain, ".qwen")));
+    assert.ok(!existsSync(join(plain, "QWEN.md")));
+    assert.equal(read(plain, ".prettierignore"), ".qwen/\n");
+  });
+
   test("the removal deletes only the kit's unchanged files and leaves the project's", () => {
     const dir = tempProject({ scripts: {} }, { ".qwen/skills/mine/SKILL.md": "mine\n", "src/app.ts": "x\n" });
     copy(dir);
     writeFileSync(join(dir, ".qwen/skills/debug/SKILL.md"), "changed\n");
-    rmSync(join(dir, ".qwen/skills/vue"), { recursive: true });
     const out = remove(dir);
     assert.equal(out.status, 0, out.stderr);
     assert.match(out.stdout, /Removed \.qwen\/kit and \d+ other files/);
