@@ -134,6 +134,37 @@ function deletesOnlyKitDownload(command) {
   );
 }
 
+// A recursive delete that needs no one's OK: every target inside the project and either output the
+// tools make again (build folders, caches, test reports, the kit's scratch folder) or something this
+// session made (not in its starting file list). It asked 13 times in 6 kit runs, mostly for such
+// clean-ups, and Qwen Code waits for a person on an ask even in YOLO. Project folders that were
+// there at the start (`data`, `src`), hidden folders, wildcards and variables still ask.
+const REGENERABLE = /^(node_modules|\.next|dist|build|out|coverage|test-results|playwright-report|blob-report|\.turbo|\.cache|\.vite|\.nuxt|\.output|\.angular|\.local-agent)$/i;
+const SHELL_DELETE = /^(rm|rmdir|rd|Remove-Item)$/i;
+function deletesOnlyRegenerable(command) {
+  if (/["'][^"']*(&&|\|\||[;&|])[^"']*["']/.test(command)) return false; // separators inside quotes: unsure
+  let deletes = 0;
+  for (const segment of command.split(/&&|\|\||[;&|]/)) {
+    const [verb, ...rest] = segment.trim().match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+    if (!SHELL_DELETE.test(verb ?? "")) continue;
+    deletes += 1;
+    const paths = rest.filter((word) => !/^(-[\w-]+|\/[a-z])$/i.test(word) && !/^\d?>/.test(word));
+    if (paths.length === 0) return false;
+    for (const word of paths) {
+      const path = word.replace(/^(["'])(.*)\1$/, "$2");
+      if (/[*?$%`<>]/.test(path)) return false;
+      const rel = relative(root, resolve(root, path)).replaceAll("\\", "/").replace(/\/+$/, "");
+      if (!rel || rel.startsWith("..") || /^[a-z]:/i.test(rel)) return false;
+      const first = rel.split("/")[0];
+      if (REGENERABLE.test(first)) continue;
+      const madeThisSession =
+        Boolean(state.startFiles) && !first.startsWith(".") && !Object.keys(state.startFiles).some((file) => file === rel || file.startsWith(`${rel}/`));
+      if (!madeThisSession) return false;
+    }
+  }
+  return deletes > 0;
+}
+
 function decide(decision, reason) {
   // A refusal inside a batch of parallel calls is easy to read past: focus.mjs repeats it on the
   // next tool result, and the Stop hook if nothing came after.
@@ -220,7 +251,11 @@ if (tool === "Bash") {
     else decide("deny", reason);
   }
   if ((state.removeKit && REMOVE_KIT.test(command)) || deletesOnlyKitDownload(command)) process.exit(0);
-  for (const [pattern, reason] of ASK) if (pattern.test(command)) block("ask", reason, key);
+  const cleanUp = deletesOnlyRegenerable(command);
+  for (const [pattern, reason] of ASK) {
+    if (cleanUp && reason === "Recursive delete." && !/rmSync|rmdirSync|rmtree/.test(command)) continue;
+    if (pattern.test(command)) block("ask", reason, key);
+  }
   if (command !== original || background) {
     rewrite(
       { command, ...(background ? { is_background: true } : {}) },

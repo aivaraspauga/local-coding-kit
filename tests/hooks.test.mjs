@@ -115,8 +115,19 @@ describe("guard", () => {
     ["Bash", { command: 'cd "C:/app" && npm run dev > /tmp/dev.log 2>&1 &' }, "rewrite"],
     ["run_shell_command", { command: "npx next dev --port 3123" }, "rewrite"],
     ["Bash", { command: "pnpm start" }, "rewrite"],
-    ["Bash", { command: "rm -rf node_modules" }, "ask"],
-    ["run_shell_command", { command: "Remove-Item dist -Recurse -Force" }, "ask"],
+    // Recursive deletes: output the tools make again goes through; anything else asks.
+    ["Bash", { command: "rm -rf node_modules" }, "allow"],
+    ["run_shell_command", { command: "Remove-Item dist -Recurse -Force" }, "allow"],
+    ["run_shell_command", { command: "rmdir /s /q .next 2>nul && npm run build" }, "allow"],
+    ["Bash", { command: "rm -rf test-results playwright-report .local-agent/tmp" }, "allow"],
+    ["Bash", { command: "rm -rf src" }, "ask"],
+    ["run_shell_command", { command: "rmdir /s /q data" }, "ask"],
+    ["Bash", { command: "rm -rf node_modules && rm -rf src" }, "ask"],
+    ["Bash", { command: "rm -rf node_modules ../other" }, "ask"],
+    ["Bash", { command: "rm -rf *" }, "ask"],
+    ["Bash", { command: "rm -rf $DIR" }, "ask"],
+    ["Bash", { command: "rm -rf .git" }, "ask"],
+    ["run_shell_command", { command: `node -e "require('fs').rmSync('dist',{recursive:true})"` }, "ask"],
     ["run_shell_command", { command: `node -e "fs=require('fs');fs.rmSync('.claude',{recursive:true,force:true})"` }, "ask"],
     ["Bash", { command: `python -c "import shutil; shutil.rmtree('data')"` }, "ask"],
     ["Bash", { command: `node -e "require('fs').rmSync('data/demo.db',{force:true})"` }, "allow"],
@@ -180,6 +191,19 @@ describe("guard", () => {
       assert.equal(decide(tool, params), want);
     });
   }
+  test("a recursive delete of a folder this session made goes through; one that was there asks", () => {
+    const dir = tempProject({ scripts: {} }, { "data/app.db": "x", "src/a.ts": "x", "src/old/b.ts": "x" });
+    const session_id = `delete-${process.pid}-${Date.now()}`;
+    hook("session-start.mjs", { session_id, source: "startup" }, { project: dir });
+    mkdirSync(join(dir, "better-auth_migrations"));
+    writeFileSync(join(dir, "better-auth_migrations", "0001.sql"), "x");
+    const decideIn = (command) =>
+      hook("guard.mjs", { session_id, tool_name: "run_shell_command", tool_input: { command } }, { project: dir }).json?.hookSpecificOutput
+        ?.permissionDecision ?? "allow";
+    assert.equal(decideIn("rmdir /s /q better-auth_migrations"), "allow", "made this session");
+    assert.equal(decideIn("rmdir /s /q data && rmdir /s /q better-auth_migrations"), "ask", "data was there");
+    assert.equal(decideIn("rm -rf src/old"), "ask", "inside a folder that was there: its files may be the user's");
+  });
   test("a rewritten call keeps Qwen's own parameter names and gets the corrected command", () => {
     const rewritten = (tool_input) =>
       hook("guard.mjs", { tool_name: "run_shell_command", tool_input }, { project }).json?.hookSpecificOutput;
@@ -192,7 +216,7 @@ describe("guard", () => {
     assert.equal(rewritten({ command: "npm install better-auth @1.7.12" }).updatedInput.command, "npm install better-auth@1.7.12");
     assert.equal(rewritten({ command: "curl -d 'email=demo @example.com' x" }).updatedInput.command, "curl -d 'email=demo@example.com' x");
     // A corrected command still meets every other rule: a recursive delete in it still asks.
-    assert.equal(rewritten({ command: "rm -rf build && npx create-next-app @latest ." }).permissionDecision, "ask");
+    assert.equal(rewritten({ command: "rm -rf src && npx create-next-app @latest ." }).permissionDecision, "ask");
   });
   test("a package.json change that leaves the check scripts alone goes through; one that changes them asks", () => {
     const pkg = { name: "app", scripts: { dev: "next dev", lint: "eslint", test: "vitest run" }, dependencies: { next: "16.0.0" } };
@@ -254,17 +278,17 @@ describe("guard", () => {
     const session = `allow-${process.pid}-${Date.now()}`;
     const guard = (command, id = session) =>
       hook("guard.mjs", { session_id: id, tool_name: "run_shell_command", tool_input: { command } }, { project: dir }).json?.hookSpecificOutput;
-    const blocked = guard("rmdir /s /q build");
+    const blocked = guard("rmdir /s /q src");
     assert.equal(blocked.permissionDecision, "ask");
     const code = /reply "allow ([0-9a-f]{4})"/.exec(blocked.permissionDecisionReason)?.[1];
     assert.ok(code, blocked.permissionDecisionReason);
-    assert.ok(guard("rmdir /s /q build").permissionDecisionReason.includes(code), "a retry gets the same code");
+    assert.ok(guard("rmdir /s /q src").permissionDecisionReason.includes(code), "a retry gets the same code");
     const reminder = hook("reminder.mjs", { session_id: session, prompt: `yes, allow ${code}` }, { project: dir });
-    assert.match(reminder.json.hookSpecificOutput.additionalContext, /The user allowed this .*`rmdir \/s \/q build`\. Run it again unchanged/);
-    assert.equal(guard("rmdir /s /q build"), undefined, "allowed now");
-    assert.equal(guard("rmdir  /s /q   build"), undefined, "spacing does not matter");
-    assert.equal(guard("rmdir /s /q src").permissionDecision, "ask", "another command still asks");
-    assert.equal(guard("rmdir /s /q build", `${session}-other`).permissionDecision, "ask", "another conversation still asks");
+    assert.match(reminder.json.hookSpecificOutput.additionalContext, /The user allowed this .*`rmdir \/s \/q src`\. Run it again unchanged/);
+    assert.equal(guard("rmdir /s /q src"), undefined, "allowed now");
+    assert.equal(guard("rmdir  /s /q   src"), undefined, "spacing does not matter");
+    assert.equal(guard("rmdir /s /q data").permissionDecision, "ask", "another command still asks");
+    assert.equal(guard("rmdir /s /q src", `${session}-other`).permissionDecision, "ask", "another conversation still asks");
     // A code the guard never gave allows nothing.
     hook("reminder.mjs", { session_id: session, prompt: "allow 0000" }, { project: dir });
     assert.equal(guard("git reset --hard").permissionDecision, "ask");

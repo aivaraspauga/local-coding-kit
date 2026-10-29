@@ -16,7 +16,7 @@ Tested only on Windows 11. The model and server settings below are tuned for one
 - **A second look:** a reviewer helper reads the change and finds bugs.
 - **Recipes** for common jobs: pages, forms, full-stack features, tests, debugging.
 - **Up-to-date facts:** it tells the model which installed packages are newer than its training.
-- **Safety:** it blocks force-push, recursive deletes and edits to its own rules. To allow one, reply `allow <code>`.
+- **Safety:** it blocks force-push, deleting project folders that were there before (build output, caches and what the session made are free to delete) and edits to its own rules. To allow one, reply `allow <code>`. Two common slips are fixed instead of blocked: a dev server started in the foreground runs in the background, and the space Qwen Code puts before `@` is taken out.
 - **Keeps it on track** when the model reads or searches too much.
 - **Cleans every edit** (format and lint fixes). It also stops one `Response` object that is kept and sent for every request: only the first request gets its body.
 - **Sized to the task:** a small change (1-2 code files, nothing on the server, data or dependencies) gets a unit or component test and the checks, without the reviewer or a new e2e test. You can still ask for a review.
