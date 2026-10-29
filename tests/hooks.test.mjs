@@ -93,8 +93,11 @@ describe("fileSignatures", () => {
 
 describe("guard", () => {
   const project = tempProject({ scripts: {} });
-  const decide = (tool_name, tool_input) =>
-    hook("guard.mjs", { tool_name, tool_input }, { project }).json?.hookSpecificOutput?.permissionDecision ?? "allow";
+  // "rewrite": the call runs with corrected input (updatedInput) instead of being refused.
+  const decide = (tool_name, tool_input) => {
+    const out = hook("guard.mjs", { tool_name, tool_input }, { project }).json?.hookSpecificOutput;
+    return out?.permissionDecision ?? (out?.updatedInput ? "rewrite" : "allow");
+  };
   const cases = [
     ["Bash", { command: "git push --force origin main" }, "deny"],
     ["Bash", { command: "git commit -m x --no-verify" }, "deny"],
@@ -108,10 +111,10 @@ describe("guard", () => {
     ["Edit", { file_path: join(kitDir, "scripts", "stop-check.mjs") }, "ask"],
     ["Bash", { command: "sleep 30" }, "deny"],
     ["run_shell_command", { command: "Start-Sleep -Seconds 60" }, "deny"],
-    ["Bash", { command: "npm run dev" }, "deny"],
-    ["Bash", { command: 'cd "C:/app" && npm run dev > /tmp/dev.log 2>&1 &' }, "deny"],
-    ["run_shell_command", { command: "npx next dev --port 3123" }, "deny"],
-    ["Bash", { command: "pnpm start" }, "deny"],
+    ["Bash", { command: "npm run dev" }, "rewrite"],
+    ["Bash", { command: 'cd "C:/app" && npm run dev > /tmp/dev.log 2>&1 &' }, "rewrite"],
+    ["run_shell_command", { command: "npx next dev --port 3123" }, "rewrite"],
+    ["Bash", { command: "pnpm start" }, "rewrite"],
     ["Bash", { command: "rm -rf node_modules" }, "ask"],
     ["run_shell_command", { command: "Remove-Item dist -Recurse -Force" }, "ask"],
     ["run_shell_command", { command: `node -e "fs=require('fs');fs.rmSync('.claude',{recursive:true,force:true})"` }, "ask"],
@@ -136,17 +139,17 @@ describe("guard", () => {
     ["Edit", { file_path: join(project, "src", "package.json") }, "allow"],
     // Qwen Code's tool ids and its shell's is_background.
     ["run_shell_command", { command: "git push --force origin main" }, "deny"],
-    ["run_shell_command", { command: "npm run dev" }, "deny"],
+    ["run_shell_command", { command: "npm run dev" }, "rewrite"],
     ["run_shell_command", { command: "npm run dev", is_background: true }, "allow"],
     ["run_shell_command", { command: "echo '{}' > .qwen/settings.json" }, "ask"],
     ["write_file", { file_path: join(project, ".qwen", "settings.json") }, "ask"],
     ["edit", { file_path: join(project, "package.json") }, "ask"],
     ["edit", { file_path: join(project, "src", "app", "page.tsx") }, "allow"],
     // The space Qwen Code puts before '@' in the user's message, copied into a command.
-    ["run_shell_command", { command: 'npx create-next-app @latest . --ts --import-alias "@/*" --yes' }, "deny"],
-    ["run_shell_command", { command: 'npx create-next-app@latest . --ts --import-alias " @/*" --yes' }, "deny"],
-    ["run_shell_command", { command: "npm install better-auth @1.7.12" }, "deny"],
-    ["Bash", { command: "curl -d 'email=demo @example.com' localhost:3000/login" }, "deny"],
+    ["run_shell_command", { command: 'npx create-next-app @latest . --ts --import-alias "@/*" --yes' }, "rewrite"],
+    ["run_shell_command", { command: 'npx create-next-app@latest . --ts --import-alias " @/*" --yes' }, "rewrite"],
+    ["run_shell_command", { command: "npm install better-auth @1.7.12" }, "rewrite"],
+    ["Bash", { command: "curl -d 'email=demo @example.com' localhost:3000/login" }, "rewrite"],
     ["run_shell_command", { command: 'npx create-next-app@latest . --ts --import-alias "@/*" --yes' }, "allow"],
     ["run_shell_command", { command: "npm install better-auth @better-auth/libsql @libsql/client" }, "allow"],
     ["run_shell_command", { command: "npm i -D @types/node@latest @next/env" }, "allow"],
@@ -177,6 +180,41 @@ describe("guard", () => {
       assert.equal(decide(tool, params), want);
     });
   }
+  test("a rewritten call keeps Qwen's own parameter names and gets the corrected command", () => {
+    const rewritten = (tool_input) =>
+      hook("guard.mjs", { tool_name: "run_shell_command", tool_input }, { project }).json?.hookSpecificOutput;
+    const dev = rewritten({ command: "npm run dev", description: "Start the app" });
+    assert.deepEqual(dev.updatedInput, { command: "npm run dev", description: "Start the app", is_background: true });
+    assert.match(dev.additionalContext, /in the background/);
+    const at = rewritten({ command: 'npx create-next-app @latest . --import-alias " @/*" --yes', is_background: false });
+    assert.deepEqual(at.updatedInput, { command: 'npx create-next-app@latest . --import-alias "@/*" --yes', is_background: false });
+    assert.match(at.additionalContext, /took out the space before '@'/);
+    assert.equal(rewritten({ command: "npm install better-auth @1.7.12" }).updatedInput.command, "npm install better-auth@1.7.12");
+    assert.equal(rewritten({ command: "curl -d 'email=demo @example.com' x" }).updatedInput.command, "curl -d 'email=demo@example.com' x");
+    // A corrected command still meets every other rule: a recursive delete in it still asks.
+    assert.equal(rewritten({ command: "rm -rf build && npx create-next-app @latest ." }).permissionDecision, "ask");
+  });
+  test("a package.json change that leaves the check scripts alone goes through; one that changes them asks", () => {
+    const pkg = { name: "app", scripts: { dev: "next dev", lint: "eslint", test: "vitest run" }, dependencies: { next: "16.0.0" } };
+    const dir = tempProject(null, { "package.json": `${JSON.stringify(pkg, null, 2)}\n` });
+    const text = readFileSync(join(dir, "package.json"), "utf8");
+    const decideIn = (tool_name, tool_input) =>
+      hook("guard.mjs", { tool_name, tool_input: { file_path: join(dir, "package.json"), ...tool_input } }, { project: dir }).json
+        ?.hookSpecificOutput?.permissionDecision ?? "allow";
+    const edit = (from, to) => decideIn("edit", { old_string: from, new_string: to });
+    assert.equal(edit('"next": "16.0.0"', '"next": "16.0.0",\n    "zod": "4.1.0"'), "allow", "a dependency");
+    assert.equal(edit('"dev": "next dev"', '"dev": "next dev --turbopack"'), "allow", "a script that is not a check");
+    assert.equal(edit('"dev": "next dev"', '"dev": "next dev",\n    "test:e2e": "playwright test"'), "allow", "a script the checks don't run");
+    assert.equal(edit('"dev": "next dev"', '"dev": "next dev",\n    "check": "echo ok"'), "ask", "a new check script");
+    assert.equal(edit('"test": "vitest run"', '"test": "vitest run --passWithNoTests"'), "ask", "a weaker test script");
+    assert.equal(edit('"lint": "eslint",', ""), "ask", "a check script removed");
+    assert.equal(decideIn("edit", {}), "ask", "unsure what it changes");
+    const rewrite = (change) => decideIn("write_file", { content: JSON.stringify({ ...pkg, ...change }, null, 2) });
+    assert.equal(rewrite({ version: "1.0.0" }), "allow");
+    assert.equal(rewrite({ scripts: { ...pkg.scripts, lint: "echo ok" } }), "ask");
+    assert.equal(decideIn("write_file", { content: "not json" }), "ask");
+    assert.equal(text, readFileSync(join(dir, "package.json"), "utf8"), "the guard only reads");
+  });
   test("a new check config is free to create, unless one for the same tool exists", () => {
     const fresh = tempProject({ scripts: {} });
     const decideIn = (dir, tool_name, file) =>
@@ -294,6 +332,32 @@ describe("guard", () => {
     assert.equal(run(listOrder, { prompt: "Fix the order, then have the reviewer look at it." }).permissionDecision, "allow", "the user asked for a review");
     assert.equal(run(listOrder, { agent: "explorer" }).permissionDecision, "allow", "other helpers");
     assert.equal(run(listOrder, { start: false }).permissionDecision, "allow", "no session start: size unknown");
+  });
+  test("a refused call in a parallel batch is said again on the next result, or by the Stop hook", () => {
+    const project = tempProject({ scripts: { check: "node -e process.exit(0)" } });
+    const session_id = `refused-${process.pid}-${Date.now()}`;
+    const guard = (tool_name, tool_input) => hook("guard.mjs", { session_id, tool_name, tool_input }, { project }).json?.hookSpecificOutput;
+    const after = (command) =>
+      hook("focus.mjs", { session_id, hook_event_name: "PostToolUse", tool_name: "run_shell_command", tool_input: { command }, tool_response: { stdout: "", stderr: "" } }, { project })
+        .json?.hookSpecificOutput?.additionalContext ?? "";
+    // One batch: a write, a bare sleep (refused), then a check that passes.
+    assert.equal(guard("write_file", { file_path: join(project, "src/a.ts") }), undefined);
+    assert.equal(guard("run_shell_command", { command: "sleep 30" }).permissionDecision, "deny");
+    const note = after("npm run check");
+    assert.match(note, /^NOT DONE: the kit refused this call/);
+    assert.match(note, /- run_shell_command `sleep 30`: A bare sleep only burns time/);
+    assert.doesNotMatch(after("npm run check"), /NOT DONE/, "said once");
+    // The last call of a turn refused: nothing comes after it but the Stop hook.
+    assert.equal(guard("run_shell_command", { command: "sleep 30" }).permissionDecision, "deny");
+    const stop = hook("stop-check.mjs", { session_id }, { project });
+    assert.equal(stop.code, 2);
+    assert.match(stop.stderr, /NOT DONE: the kit refused this call/);
+    assert.notEqual(hook("stop-check.mjs", { session_id }, { project }).stderr.includes("NOT DONE"), true, "said once");
+    // A helper agent's refusals stay with the helper.
+    guard("run_shell_command", { command: "sleep 30" });
+    const helper = hook("focus.mjs", { session_id, agent_id: "tester-1", hook_event_name: "PostToolUse", tool_name: "run_shell_command", tool_input: { command: "ls" }, tool_response: { stdout: "" } }, { project });
+    assert.doesNotMatch(helper.json?.hookSpecificOutput?.additionalContext ?? "", /NOT DONE/);
+    assert.match(after("ls"), /NOT DONE/);
   });
   test("never holds a write, and reminds once after a 4th code file with no check run (small steps)", () => {
     const project = tempProject({ scripts: { typecheck: "tsc --noEmit", test: "vitest run" } }, { "tsconfig.json": "{}" });

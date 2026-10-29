@@ -16,6 +16,7 @@ import {
   readInput,
   readState,
   SMALL_STEP_FILES,
+  takeRefused,
   writeState,
 } from "./lib/project.mjs";
 
@@ -168,6 +169,18 @@ function latestThinking(path) {
 }
 
 const notes = [];
+// Calls the guard refused since the last result, said again where the model reads next (a run
+// read past them in a parallel batch and took the files for written, 2026-10-29).
+const refused = takeRefused(projectRoot(), input);
+if (refused.length > 0) {
+  notes.push(
+    [
+      `NOT DONE: the kit refused ${refused.length === 1 ? "this call" : `these ${refused.length} calls`}, so ${refused.length === 1 ? "it" : "they"} changed nothing:`,
+      ...refused.map((line) => `- ${line}`),
+      "Your other calls ran. Deal with each reason, then make the refused calls again (or say why not).",
+    ].join("\n"),
+  );
+}
 if (acted) {
   state.streak = 0;
   state.webStreak = 0;

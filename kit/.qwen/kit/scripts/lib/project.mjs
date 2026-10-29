@@ -1,17 +1,20 @@
 // Shared helpers for the hook scripts: where the project is, how it checks itself, and hook I/O.
 import { createHash } from "node:crypto";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // The folder that holds the kit in a project (.qwen).
@@ -218,6 +221,45 @@ export function readState(root, sessionId) {
 export function writeState(root, sessionId, state) {
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(stateFile(root, sessionId), JSON.stringify(state));
+}
+
+// Calls the guard refused, one line each, until a later hook tells the model: focus.mjs on its next
+// tool result, or the Stop hook. The model sends calls in parallel batches and read past refusals
+// in them as if the calls were done (2026-10-29: 19 lost writes). Kept per helper agent, and in a
+// file that is only appended to, because the hooks of parallel calls run at the same time.
+function refusedFile(root, input) {
+  const owner = input.agent_id ? `${input.session_id ?? "default"}-${input.agent_id}` : input.session_id;
+  return stateFile(root, owner).replace(/\.json$/, "-refused.log");
+}
+
+export function noteRefused(root, input, line) {
+  mkdirSync(stateDir, { recursive: true });
+  appendFileSync(refusedFile(root, input), `${line.replace(/\s+/g, " ").trim()}\n`);
+}
+
+// The refused calls not told yet, and forgets them (moved aside first, so a refusal written
+// meanwhile is kept for the next call).
+export function takeRefused(root, input) {
+  const file = refusedFile(root, input);
+  const taken = `${file}.${process.pid}`;
+  try {
+    renameSync(file, taken);
+  } catch {
+    return [];
+  }
+  try {
+    return readFileSync(taken, "utf8").split("\n").filter(Boolean);
+  } finally {
+    rmSync(taken, { force: true });
+  }
+}
+
+// What the model would call the refused call, in its own tool names.
+export function describeCall(root, tool, params) {
+  const name = { Bash: "run_shell_command", Write: "write_file", Edit: "edit", Agent: "agent" }[tool] ?? tool;
+  if (params.file_path) return `${name} ${relative(root, resolve(root, String(params.file_path))).replaceAll("\\", "/")}`;
+  if (params.command) return `${name} \`${String(params.command).slice(0, 120)}\``;
+  return params.subagent_type ? `${name} ${params.subagent_type}` : name;
 }
 
 const NOT_SOURCE = new Set([

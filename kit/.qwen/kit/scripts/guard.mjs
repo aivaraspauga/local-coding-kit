@@ -6,7 +6,7 @@
 // for the rest of the conversation. In Qwen Code's YOLO mode an "ask" reaches no one and works as a
 // refusal, so without this an approved deletion could not run at all (2026-10-27).
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,8 @@ import {
   changeSize,
   CHECK_CONFIGS,
   checkCommand,
+  describeCall,
+  noteRefused,
   output,
   projectRoot,
   readInput,
@@ -79,14 +81,17 @@ const DENY = [
     /^\s*(sleep|Start-Sleep(\s+-(s|Seconds|Milliseconds))?)\s+\d+(\.\d+)?[smh]?\s*;?\s*$/i,
     "A bare sleep only burns time. You are told when a background agent or command finishes. If you need an agent's answer before you can go on, start it in the foreground (run_in_background: false). To wait for a server, poll its URL or output for the ready message.",
   ],
-  // Qwen Code puts a space before an `@` joined to a word in the user's message, and the model copies it:
-  // `create-next-app @latest`, `--import-alias " @/*"`, `demo @example.com`. A scoped package after a
-  // space (`npm i a @scope/b`) is fine and not matched.
-  [
-    /[\w)\]]\s+@(latest|next|canary|beta|rc|\d[\w.^~-]*)(?![\w/-])|["']\s+@\/|[\w.+-]\s+@[\w-]+\.(com|org|net|io|dev|test|local)\b/i,
-    "This command has a space before '@' (Qwen Code adds one to an '@' in the user's message). Write it without the space, for example `create-next-app@latest`, `\"@/*\"`, `demo@example.com`, and run it again.",
-  ],
 ];
+// Qwen Code puts a space before an `@` joined to a word in the user's message, and the model copies it:
+// `create-next-app @latest`, `--import-alias " @/*"`, `demo @example.com`. The space is taken out
+// before the command runs (it used to be refused, which costs a turn and can be read past in a
+// batch). A scoped package after a space (`npm i a @scope/b`) is fine and not touched.
+const AT_SPACES = [
+  [/([\w)\]])\s+@(?=(latest|next|canary|beta|rc|\d[\w.^~-]*)(?![\w/-]))/gi, "$1@"],
+  [/(["'])\s+@\//g, "$1@/"],
+  [/([\w.+-])\s+@(?=[\w-]+\.(com|org|net|io|dev|test|local)\b)/gi, "$1@"],
+];
+const fixAtSpaces = (command) => AT_SPACES.reduce((text, [pattern, to]) => text.replace(pattern, to), command);
 // Commands that start a server and never exit on their own.
 const DEV_SERVER =
   /(^|&&|\|\||;|\(|\s)((npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start)|(npx\s+)?next\s+(dev|start))(?=\s|$|;|&|\||\))/i;
@@ -130,6 +135,9 @@ function deletesOnlyKitDownload(command) {
 }
 
 function decide(decision, reason) {
+  // A refusal inside a batch of parallel calls is easy to read past: focus.mjs repeats it on the
+  // next tool result, and the Stop hook if nothing came after.
+  if (decision === "deny") noteRefused(root, input, `${describeCall(root, tool, params)}: ${reason.split(/(?<=\.) /)[0]}`);
   output({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -157,8 +165,47 @@ const insidePlugin = (path) => {
   return rel === "" || (!rel.startsWith("..") && !/^[a-z]:/i.test(rel));
 };
 
+// Runs the call with corrected input instead of refusing it. `run_in_background` is the kit's own
+// name for Qwen's `is_background` (lib/project.mjs adds it); Qwen gets back only its own names.
+function rewrite(changes, note) {
+  const { run_in_background, ...own } = params;
+  output({
+    hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: { ...own, ...changes }, additionalContext: note },
+  });
+  process.exit(0);
+}
+
+// The check scripts of a package.json: the only part of it that changes what the checks enforce
+// (checkCommand in lib/project.mjs runs these names; `test:e2e` and the like are not among them).
+const CHECK_SCRIPT = /^(check|typecheck|type-check|lint|test|build)$/;
+function checkScripts(text) {
+  const scripts = JSON.parse(text).scripts ?? {};
+  return JSON.stringify(Object.keys(scripts).filter((name) => CHECK_SCRIPT.test(name)).sort().map((name) => [name, scripts[name]]));
+}
+// True when the edit or write leaves the check scripts as they are (dependencies, other scripts).
+// Unsure (unreadable, not JSON) counts as a change, so the user is still asked.
+function keepsCheckScripts(target) {
+  try {
+    const before = readFileSync(target, "utf8");
+    let after = String(params.content ?? "");
+    if (tool === "Edit") {
+      const from = String(params.old_string ?? "");
+      const to = String(params.new_string ?? "");
+      if (!from || !before.includes(from)) return false;
+      after = params.replace_all ? before.split(from).join(to) : before.replace(from, () => to);
+    }
+    return checkScripts(before) === checkScripts(after);
+  } catch {
+    return false;
+  }
+}
+
 if (tool === "Bash") {
-  const command = String(params.command ?? "");
+  const original = String(params.command ?? "");
+  const command = fixAtSpaces(original);
+  // A dev server never exits: in the foreground it would block until the command times out, so it
+  // runs in the background instead (it used to be refused with "run it again in the background").
+  const background = DEV_SERVER.test(command) && params.run_in_background !== true;
   const key = command.trim().replace(/\s+/g, " ");
   const pluginPath = kitRoot.replaceAll("\\", "/").toLowerCase();
   const checked = command.replace(GITIGNORE_WRITE, " ");
@@ -172,14 +219,21 @@ if (tool === "Bash") {
     if (liftable) block("deny", reason, key);
     else decide("deny", reason);
   }
-  if (DEV_SERVER.test(command) && params.run_in_background !== true) {
-    decide(
-      "deny",
-      "A dev server never exits, so in the foreground it blocks until the command times out. Run it again with is_background: true; its output is kept for you to read. Next.js allows one dev server per project: if one is already running, use it instead of starting another, and stop it when you are done.",
-    );
-  }
   if ((state.removeKit && REMOVE_KIT.test(command)) || deletesOnlyKitDownload(command)) process.exit(0);
   for (const [pattern, reason] of ASK) if (pattern.test(command)) block("ask", reason, key);
+  if (command !== original || background) {
+    rewrite(
+      { command, ...(background ? { is_background: true } : {}) },
+      [
+        command !== original ? `The kit took out the space before '@' in your command (Qwen Code adds one to an '@' in the user's message): it ran \`${command}\`.` : "",
+        background
+          ? "The kit started this dev server in the background, because it never exits; its output is kept for you to read. Next.js allows one dev server per project: if one already runs, use it, and stop it when you are done."
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+  }
 } else if (tool === "Edit" || tool === "Write") {
   const target = resolve(root, String(params.file_path ?? ""));
   const rel = relative(root, target).replaceAll("\\", "/");
@@ -196,7 +250,10 @@ if (tool === "Bash") {
   // A config the user's own message names ("Create vitest.config.ts: React plugin ...") is part of
   // the task. Asked about a vitest.config.ts the prompt described, a run skipped the step (2026-10-27).
   const named = (state.named ?? []).includes(basename(rel).toLowerCase());
-  if (CHECK_CONFIGS.test(rel) && !isNewConfig && !madeThisSession && !named) {
+  // A package.json change that leaves the check scripts alone (a dependency, a dev script) is
+  // ordinary work; asking stops an unattended run until someone answers (Qwen asks even in YOLO).
+  const harmlessPackage = rel === "package.json" && keepsCheckScripts(target);
+  if (CHECK_CONFIGS.test(rel) && !isNewConfig && !madeThisSession && !named && !harmlessPackage) {
     block("ask", `${rel} controls what the project's checks enforce; the user should approve this change.`, key);
   }
   // Small steps are a reminder after the write (focus.mjs), not a refusal here. The model writes

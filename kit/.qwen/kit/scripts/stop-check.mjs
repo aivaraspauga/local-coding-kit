@@ -27,6 +27,7 @@ import {
   projectRoot,
   readInput,
   readState,
+  takeRefused,
   writeState,
 } from "./lib/project.mjs";
 
@@ -46,6 +47,21 @@ const REPORT_AGAIN =
 const input = readInput();
 const root = projectRoot();
 const command = checkCommand(root);
+
+// A refused call with no tool call after it: focus.mjs never got to say so. Before anything else,
+// because the model may be reporting work that was never done. Told once (takeRefused forgets it).
+const refused = takeRefused(root, input);
+if (refused.length > 0) {
+  console.error(
+    [
+      `NOT DONE: the kit refused ${refused.length === 1 ? "this call" : `these ${refused.length} calls`}, so ${refused.length === 1 ? "it" : "they"} changed nothing:`,
+      ...refused.map((line) => `- ${line}`),
+      "Deal with each reason and make them again, or say in your report which ones are not done and why.",
+      REPORT_AGAIN,
+    ].join("\n"),
+  );
+  process.exit(2);
+}
 
 function runCheck() {
   return spawnSync(command, {
