@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,6 +11,7 @@ import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { checkCommand, fileSignatures, readState } from "../kit/.qwen/kit/scripts/lib/project.mjs";
+import { findRisks } from "../kit/.qwen/kit/scripts/lib/risks.mjs";
 
 const kit = dirname(dirname(fileURLToPath(import.meta.url)));
 // The kit as a project gets it: hook scripts and the working style under .qwen/kit.
@@ -257,6 +258,77 @@ describe("guard", () => {
     assert.equal(guard("node .qwen/kit/scripts/remove.mjs && rm -rf src"), "ask", "nothing more in the command");
     assert.equal(guard("node .qwen/kit/scripts/remove.mjs", `${session}-other`), "ask", "another conversation");
   });
+  test("turns the reviewer away on a small change, not on a bigger or risky one", () => {
+    // The file sets of the 2026-10-28 kit runs: the list-order fix (reviewer 5.9 min, nothing found),
+    // the clear-finished button (new route) and the create-project form (reviewer found 4 defects).
+    const files = {
+      "src/components/task-list.tsx": "a\n",
+      "src/server/tasks.ts": "a\n",
+      "src/server/projects.ts": "a\n",
+      "src/app/page.tsx": "a\n",
+      "tests/components/task-list.test.tsx": "a\n",
+    };
+    const run = (change, { prompt, agent = "reviewer", start = true } = {}) => {
+      const dir = tempProject({ scripts: {} }, files);
+      const session = `size-${process.pid}-${Math.random()}`;
+      if (start) hook("session-start.mjs", { session_id: session, source: "startup" }, { project: dir, env: { LOCAL_AGENT_OFFLINE: "1" } });
+      if (prompt) hook("reminder.mjs", { session_id: session, prompt }, { project: dir });
+      for (const [path, text] of Object.entries(change)) {
+        mkdirSync(dirname(join(dir, path)), { recursive: true });
+        writeFileSync(join(dir, path), text);
+      }
+      const out = hook("guard.mjs", { session_id: session, tool_name: "agent", tool_input: { subagent_type: agent, description: "Review", prompt: "Review it" } }, { project: dir });
+      return out.json?.hookSpecificOutput ?? { permissionDecision: "allow" };
+    };
+    const listOrder = { "src/components/task-list.tsx": "b\n", "src/lib/task-order.ts": "b\n", "tests/components/task-list.test.tsx": "b\n", "e2e/projects.spec.ts": "b\n" };
+    const denied = run(listOrder);
+    assert.equal(denied.permissionDecision, "deny");
+    assert.match(denied.permissionDecisionReason, /small \(src\/components\/task-list\.tsx, src\/lib\/task-order\.ts\)/);
+    assert.equal(run({ "src/app/page.tsx": "b\n" }).permissionDecision, "deny", "one UI file");
+    const clearFinished = { "src/app/api/projects/[id]/tasks/finished/route.ts": "b\n", "src/components/task-list.tsx": "b\n" };
+    assert.equal(run(clearFinished).permissionDecision, "allow", "a new API route");
+    assert.equal(run({ "src/server/tasks.ts": "b\n" }).permissionDecision, "allow", "server code");
+    assert.equal(run({ "package.json": "{}" }).permissionDecision, "allow", "a dependency change");
+    const createProject = { "src/app/page.tsx": "b\n", "src/components/project-list.tsx": "b\n", "src/lib/names.ts": "b\n" };
+    assert.equal(run(createProject).permissionDecision, "allow", "3 code files");
+    assert.equal(run(listOrder, { prompt: "Fix the order, then have the reviewer look at it." }).permissionDecision, "allow", "the user asked for a review");
+    assert.equal(run(listOrder, { agent: "explorer" }).permissionDecision, "allow", "other helpers");
+    assert.equal(run(listOrder, { start: false }).permissionDecision, "allow", "no session start: size unknown");
+  });
+  test("holds a 4th new code file until a check or test runs (small steps)", () => {
+    const project = tempProject({ scripts: { typecheck: "tsc --noEmit", test: "vitest run" } }, { "tsconfig.json": "{}" });
+    const session_id = `steps-${process.pid}-${Date.now()}`;
+    const edited = (path) =>
+      hook("focus.mjs", { session_id, hook_event_name: "PostToolUse", tool_name: "edit", tool_input: { file_path: join(project, path) } }, { project });
+    const ran = (command, event = "PostToolUse") =>
+      hook("focus.mjs", { session_id, hook_event_name: event, tool_name: "run_shell_command", tool_input: { command }, tool_response: { stdout: "", stderr: "" } }, { project });
+    const decide = (path, extra = {}) =>
+      hook("guard.mjs", { session_id, tool_name: "write_file", tool_input: { file_path: join(project, path) }, ...extra }, { project }).json
+        ?.hookSpecificOutput ?? { permissionDecision: "allow" };
+    for (const path of ["src/a.ts", "src/b.tsx", "src/app/api/x/route.ts"]) {
+      assert.equal(decide(path).permissionDecision, "allow", path);
+      edited(path);
+    }
+    const held = decide("src/d.ts");
+    assert.equal(held.permissionDecision, "deny");
+    assert.match(held.permissionDecisionReason, /src\/a\.ts, src\/b\.tsx, src\/app\/api\/x\/route\.ts and have run no check/);
+    assert.match(held.permissionDecisionReason, /npm run typecheck/);
+    assert.equal(decide("src/a.ts").permissionDecision, "allow", "another edit to a changed file");
+    assert.equal(decide("tests/a.test.ts").permissionDecision, "allow", "a test");
+    assert.equal(decide("src/app/globals.css").permissionDecision, "allow", "styles");
+    assert.equal(decide("next.config.ts").permissionDecision, "allow", "a config");
+    assert.equal(decide("src/d.ts", { agent_id: "tester-1" }).permissionDecision, "allow", "inside a helper agent");
+    ran("git status");
+    assert.equal(decide("src/d.ts").permissionDecision, "deny", "git status is not a check");
+    ran("npm run typecheck", "PostToolUseFailure");
+    assert.equal(decide("src/d.ts").permissionDecision, "allow", "a failing check run counts too: it was seen");
+    const bare = tempProject(null);
+    for (const path of ["a.js", "b.js", "c.js"]) {
+      hook("focus.mjs", { session_id, hook_event_name: "PostToolUse", tool_name: "edit", tool_input: { file_path: join(bare, path) } }, { project: bare });
+    }
+    const free = hook("guard.mjs", { session_id, tool_name: "write_file", tool_input: { file_path: join(bare, "d.js") } }, { project: bare });
+    assert.equal(free.json, null, "a project with nothing to run");
+  });
 });
 
 describe("focus", () => {
@@ -323,6 +395,25 @@ describe("focus", () => {
       /npx next typegen/,
     );
     assert.equal(run("PostToolUseFailure", "npx tsc --noEmit", "error TS2344: Type 'Foo' does not satisfy the constraint 'Bar'."), "", "only route types");
+    // A generated validator left pointing at a deleted route (seen 2026-10-28 after a branch switch).
+    assert.match(
+      run("PostToolUseFailure", "npm run typecheck", `.next/dev/types/validator.ts(3,39): error TS2307: Cannot find module '../../../src/app/api/projects/[id]/tasks/finished/route.js' or its corresponding type declarations.`),
+      /Delete that one file/,
+    );
+    assert.equal(run("PostToolUseFailure", "npx tsc --noEmit", "src/a.ts(1,1): error TS2307: Cannot find module 'left-pad'."), "", "only generated files");
+    assert.match(run("PostToolUseFailure", "npm run dev", "Error: listen EADDRINUSE: address already in use :::3000"), /free port/);
+    assert.match(
+      run("PostToolUseFailure", "npm install recharts", "npm error code ERESOLVE\nnpm error Could not resolve dependency:\nnpm error peer react@\"^16.8.0 || ^17 || ^18\" from some-chart@1.2.0"),
+      /npm view <package> peerDependencies/,
+    );
+    assert.match(run("PostToolUseFailure", "npm install bcrypt", "gyp ERR! find VS could not find a version of Visual Studio 2017 or newer to use"), /bcryptjs/);
+  });
+  test("tells a new project with only the kit's files to generate the app in a subfolder", () => {
+    const empty = tempProject(null, { "QWEN.md": "kit\n", ".qwen/settings.json": "{}", ".gitignore": ".local-agent/\n" });
+    const start = (dir) => hook("session-start.mjs", { source: "startup" }, { project: dir, env: { LOCAL_AGENT_OFFLINE: "1" } }).json?.hookSpecificOutput?.additionalContext ?? "";
+    assert.match(start(empty), /no app yet[\s\S]*create-next-app@latest NAME[\s\S]*renameSync/);
+    assert.doesNotMatch(start(tempProject({ scripts: {} })), /no app yet/);
+    assert.doesNotMatch(start(tempProject(null, { "QWEN.md": "kit\n", "index.html": "<p>x</p>" })), /no app yet/, "the user's own files");
   });
   test("nudges after 4 failing test runs, counting piped runs by their output; a full pass resets", () => {
     const s = `${session}-fail`;
@@ -584,6 +675,18 @@ describe("session-start and reminder", () => {
       assert.match(context(normal), /Effort: normal/, normal);
     }
   });
+  test("reminder names the security skill for accounts, log-in, permissions and uploads", () => {
+    // An "add accounts" run loaded only the framework skill and wrote its own password hashing (2026-10-28).
+    const context = (prompt) => hook("reminder.mjs", { prompt }).json.hookSpecificOutput.additionalContext;
+    for (const prompt of [
+      "Add accounts to the app: sign up with email and password, log in, and log out.",
+      "Only admins can delete projects",
+      "Let me attach one image to each task",
+    ]) {
+      assert.match(context(prompt), /load the `security` skill/, prompt);
+    }
+    assert.doesNotMatch(context("Add a dark mode toggle to the header"), /security/);
+  });
 });
 
 describe("stop-check", () => {
@@ -802,6 +905,10 @@ describe("stop-check", () => {
       "src/form.ts": 'export const fields = { password: "current-password", passwordResetUrl: "/reset-password", apiKeyEnv: "OPENAI_API_KEY" };\n',
       "src/msg.ts": "export const m = (n: number) =>\n  `Select\n  ${n} items`;\n",
       "src/app/api/items/route.ts": "export async function GET() {\n  return Response.json([]);\n}\n",
+      // The login system's own endpoints are public by design (flagged in a 2026-10-28 run).
+      "src/app/api/auth/signup/route.ts": "export async function POST(request: Request) {\n  return Response.json(await request.json(), { status: 201 });\n}\n",
+      "src/app/api/auth/logout/route.ts": "export async function POST() {\n  return new Response(null, { status: 204 });\n}\n",
+      "src/app/login/actions.ts": '"use server";\n\nexport async function logIn(form: FormData) {\n  return form.get("email");\n}\n',
       "src/app/actions.ts":
         '"use server";\n\nimport { auth } from "@/lib/auth";\n\nexport async function deleteTask(id: string) {\n  const session = await auth();\n  if (!session) throw new Error("Unauthorized");\n  return id;\n}\n',
     };
@@ -865,6 +972,118 @@ describe("stop-check", () => {
     hook("session-start.mjs", { source: "startup" }, { project: ignored });
     writeFileSync(join(ignored, ".env"), "DATABASE_URL=postgres://u:p@localhost/db\n");
     assert.equal(hook("stop-check.mjs", {}, { project: ignored }).code, 0);
+  });
+  test("flags a fast hash in a file that handles passwords", () => {
+    const project = tempProject(null, {
+      "src/auth.ts": 'export const hash = (password: string) => createHash("sha256").update(password).digest("hex");\n',
+      "src/etag.ts": 'export const etag = (body: string) => createHash("sha256").update(body).digest("hex");\n',
+    });
+    const findings = findRisks(project, ["src/auth.ts", "src/etag.ts"], {});
+    assert.equal(findings.length, 1);
+    assert.match(findings[0], /^src\/auth\.ts: a fast hash in a file that handles passwords/);
+  });
+  describe("route probe", () => {
+    // A stand-in for `next start`: a plain server on the port it is given. `handle(method, url, body,
+    // seen)` returns [status, body]; every request is logged to node_modules/requests.log.
+    const server = (handle) => `const http = require("http");
+const fs = require("fs");
+const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
+const seen = new Set();
+const handle = ${handle};
+http.createServer((req, res) => {
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+  req.on("end", () => {
+    if (req.url !== "/") fs.appendFileSync("node_modules/requests.log", req.method + " " + req.url + "\\n");
+    const [status, text] = req.url === "/" ? [404, "{}"] : handle(req.method, req.url, body, seen);
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(text);
+  });
+}).listen(port, "127.0.0.1");
+`;
+    // 500 on a body that is not JSON (both arms of the 2026-10-28 create-project run), 400 otherwise.
+    const crashes = `(method, url, body) => {
+  if (method !== "POST") return [404, '{"error":"Not found"}'];
+  try {
+    const value = JSON.parse(body);
+    return value && !Array.isArray(value) ? [201, "{}"] : [400, '{"error":"Expected an object"}'];
+  } catch (error) {
+    console.error("SyntaxError: " + error.message);
+    return [500, "Internal Server Error"];
+  }
+}`;
+    const refuses = `() => [400, '{"error":"Bad request"}']`;
+    const sharesResponse = `(method, url, body, seen) => {
+  const key = method + url + body;
+  if (seen.has(key)) return [400, ""];
+  seen.add(key);
+  return [400, '{"error":"Bad request"}'];
+}`;
+    const ROUTES = {
+      "src/app/api/items/route.ts":
+        "export async function POST(request: Request) {\n  await requireUser();\n  return Response.json(await request.json(), { status: 201 });\n}\nexport function GET() {\n  return Response.json([]);\n}\n",
+      "src/app/(shop)/api/items/[id]/route.ts":
+        "export function GET() {\n  return Response.json({});\n}\nexport async function DELETE() {\n  await requireUser();\n  return new Response(null, { status: 204 });\n}\n",
+    };
+    const setUp = (handle, { stale = false } = {}) => {
+      const project = tempProject({ scripts: { check: "node -e process.exit(0)" }, dependencies: { next: "16.3.8" } }, { "node_modules/next/dist/bin/next": server(handle) });
+      const session_id = `probe-${process.pid}-${Math.random()}`;
+      hook("session-start.mjs", { session_id, source: "startup" }, { project, env: { LOCAL_AGENT_OFFLINE: "1" } });
+      for (const [path, text] of Object.entries(ROUTES)) {
+        mkdirSync(dirname(join(project, path)), { recursive: true });
+        writeFileSync(join(project, path), text);
+      }
+      mkdirSync(join(project, ".next"), { recursive: true });
+      writeFileSync(join(project, ".next", "BUILD_ID"), "test");
+      if (stale) utimesSync(join(project, ".next", "BUILD_ID"), new Date(Date.now() - 3600e3), new Date(Date.now() - 3600e3));
+      const stop = () => hook("stop-check.mjs", { session_id }, { project });
+      return { project, stop };
+    };
+    const requests = (project) => readFileSync(join(project, "node_modules", "requests.log"), "utf8");
+
+    test("blocks when a bad request gets a 500, and names the request and the app's error", () => {
+      const { project, stop } = setUp(crashes);
+      const out = stop();
+      assert.equal(out.code, 2, out.stderr);
+      assert.match(out.stderr, /^- POST \/api\/items, a body that is not JSON: 500 \(Internal Server Error\)$/m);
+      assert.match(out.stderr, /^- POST \/api\/items, an empty body: 500/m);
+      assert.doesNotMatch(out.stderr, /the body `null`/, "a 400 is right");
+      assert.match(out.stderr, /SyntaxError: Unexpected end of JSON input/);
+      assert.match(out.stderr, /attempt 1 of 2/);
+      // Route groups leave the URL; ids that do not exist; never a DELETE without an id.
+      const sent = requests(project);
+      assert.match(sent, /^DELETE \/api\/items\/999999999$/m);
+      assert.match(sent, /^GET \/api\/items\/not-an-id$/m);
+      assert.match(sent, /^GET \/api\/items\?q=/m);
+      assert.doesNotMatch(sent, /^DELETE \/api\/items$/m);
+      assert.doesNotMatch(sent, /\(shop\)/);
+      // The second attempt still fails; the third lets it finish and tells the user.
+      assert.equal(stop().code, 2);
+      const gaveUp = stop();
+      assert.equal(gaveUp.code, 0, gaveUp.stderr);
+      assert.match(gaveUp.json.systemMessage, /Bad requests still crash some changed API routes after 2 attempts/);
+    });
+    test("passes when every bad request gets a 4xx, and probes the same files once", () => {
+      const { project, stop } = setUp(refuses);
+      const out = stop();
+      assert.equal(out.code, 0, out.stderr);
+      // POST with 4 bodies and GET with odd query values; GET and DELETE with 2 ids each.
+      assert.match(out.json.systemMessage, /Checks passed .*; 9 bad requests to the changed API routes got a proper answer/);
+      const sent = requests(project).split("\n").filter(Boolean).length;
+      assert.equal(sent, 18, "each one twice");
+      assert.equal(stop().code, 0);
+      assert.equal(requests(project).split("\n").filter(Boolean).length, sent, "not sent again");
+    });
+    test("catches a Response reused across requests: the second answer is empty", () => {
+      const out = setUp(sharesResponse).stop();
+      assert.equal(out.code, 2);
+      assert.match(out.stderr, /the second answer had an empty body \(one Response object reused across requests\?\)/);
+    });
+    test("leaves a build older than the routes alone: it would answer for old code", () => {
+      const { project, stop } = setUp(crashes, { stale: true });
+      assert.equal(stop().code, 0);
+      assert.ok(!existsSync(join(project, "node_modules", "requests.log")));
+    });
   });
   test("a compaction does not reset the session's starting point", () => {
     const project = tempProject({ scripts: { check: "node -e process.exit(1)" } });
@@ -949,6 +1168,23 @@ describe("format-file", () => {
     } finally {
       rmSync(file, { force: true });
     }
+  });
+  test("flags a Response kept in a module variable, which only the first request gets whole", () => {
+    // The 2026-10-28 kit run's 409 for duplicate names: every duplicate after the first got an empty body.
+    const run = (text, path = "src/app/api/projects/route.ts") => {
+      const project = tempProject({}, { [path]: text });
+      return hook("format-file.mjs", { tool_name: "write_file", tool_input: { file_path: join(project, path) } }, { project });
+    };
+    const handler = "export function POST() {\n  return duplicateResponse;\n}\n";
+    const shared = run(`${handler}\nconst duplicateResponse = Response.json(\n  { error: "A project with this name already exists" },\n  { status: 409 },\n);\n`);
+    assert.equal(shared.code, 2);
+    assert.match(shared.stderr, /route\.ts:5 `duplicateResponse` is one Response made when the module loads/);
+    assert.equal(run('const notFound =\n  NextResponse.json({ error: "Not found" }, { status: 404 });\n').code, 2, "Prettier's line break");
+    assert.equal(run('export const gone: Response = new Response("Gone", { status: 410 });\n').code, 2);
+    assert.equal(run('const duplicate = () =>\n  Response.json({ error: "x" }, { status: 409 });\n').code, 0, "a function makes one per call");
+    assert.equal(run("export function GET() {\n  const response = Response.json([]);\n  return response;\n}\n").code, 0, "inside a function");
+    assert.equal(run("const noContent = new Response(null, { status: 204 });\n").code, 0, "no body to use up");
+    assert.equal(run('const r = Response.json({});\n', "tests/route.test.ts").code, 0, "a test");
   });
   test("leaves files outside the project and projects without tools alone", () => {
     const bare = tempProject({ scripts: {} }, { "a.ts": "var  x=1" });
@@ -1209,6 +1445,15 @@ describe("the kit's project files", () => {
     assert.match(readFileSync(join(project, ".qwen", "agents", "tester.md"), "utf8"), /^tools: read_file, grep_search, glob, run_shell_command, edit, write_file$/m);
   });
 
+  test("the model picks a default instead of stopping to ask, unless only the user can answer", () => {
+    // A one-prompt vibe-coding run ends at a question; "ask which auth library" could end "add accounts" (2026-10-28).
+    const text = (path) => readFileSync(join(project, path), "utf8");
+    assert.doesNotMatch(text(".qwen/kit/prompt/working-style.md"), /Two reasonable meanings: ask/);
+    assert.match(text(".qwen/kit/prompt/working-style.md"), /take the likelier one/);
+    assert.doesNotMatch(text(".qwen/skills/plan-work/SKILL.md"), /ask one short question|ask the user once/);
+    assert.doesNotMatch(text(".qwen/skills/security/SKILL.md"), /Ask the user which library/);
+    assert.doesNotMatch(text(".qwen/kit/scripts/focus.mjs"), /ask (the user|them one short question)/);
+  });
   test("the helper agents run in the foreground", () => {
     // Qwen Code starts an agent in the background unless told otherwise; a reviewer then answered after the report.
     for (const name of readdirSync(join(project, ".qwen", "agents"))) {
@@ -1225,8 +1470,8 @@ describe("the kit's project files", () => {
   });
 
   test("the generator hint moves the generated app with one command that works in every shell", () => {
-    const focus = readFileSync(join(project, ".qwen/kit/scripts/focus.mjs"), "utf8");
-    const command = /node -e \\"(.+?)\\"/.exec(focus)?.[1];
+    const shared = readFileSync(join(project, ".qwen/kit/scripts/lib/project.mjs"), "utf8");
+    const command = /node -e \\"(.+?)\\"/.exec(shared)?.[1];
     assert.ok(command, "the move command");
     const dir = tempProject(null, { "NAME/a.txt": "a", "NAME/.hidden": "h", "NAME/sub/b.txt": "b", "NAME/README.md": "generated", "README.md": "mine" });
     const run = spawnSync(process.execPath, ["-e", command], { cwd: dir, encoding: "utf8" });

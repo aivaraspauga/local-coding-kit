@@ -17,6 +17,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // The folder that holds the kit in a project (.qwen).
 export const KIT_DIR = basename(dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url))))));
 
+// Moves a generated app from the subfolder NAME up into the project without overwriting anything,
+// and names what it left. One `node -e` that works in cmd, PowerShell and bash.
+export const MOVE_UP_COMMAND =
+  "node -e \"const fs=require('fs');const left=[];for(const f of fs.readdirSync('NAME')){if(fs.existsSync(f))left.push(f);else fs.renameSync('NAME/'+f,f)}if(left.length)console.log('Already here, left in NAME: '+left.join(', '));else{fs.rmdirSync('NAME');console.log('Moved everything')}\"";
+
 // Qwen Code's tool ids, as the short names the hook scripts use (Bash, Edit, Read, ...). The
 // parameter names stay as Qwen Code sends them (file_path, command, old_string); the shell's
 // is_background is also given as run_in_background.
@@ -30,6 +35,7 @@ const QWEN_TOOLS = {
   glob: "Glob",
   list_directory: "Glob",
   web_fetch: "WebFetch",
+  agent: "Agent",
 };
 
 // Hooks get their input as JSON on stdin.
@@ -244,6 +250,36 @@ export function fingerprint(root) {
 export function changedFiles(root, before = {}) {
   const now = fileSignatures(root);
   return Object.keys(now).filter((path) => before[path] !== now[path]);
+}
+
+// Tests, notes and ignore files do not make a change bigger.
+const NOT_CODE = /(^|\/)(tests?|e2e|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.md$|(^|\/)\.(gitignore|prettierignore)$/i;
+// Where even a small change can lose data or open a hole: server and database code, API routes,
+// Server Actions, auth, dependencies.
+const RISKY =
+  /(^|\/)(api|server|actions?|db|database|auth|middleware|migrations?|prisma|drizzle|schema)(\/|\.|$)|(^|\/)route\.[cm]?[jt]s$|(^|\/)package\.json$/i;
+
+// How big the change since `before` is: the code files created, changed or deleted, and whether it is
+// small (at most 2 of them, none of them risky). A small change needs no reviewer and no new e2e test.
+export function changeSize(root, before = {}) {
+  const now = fileSignatures(root);
+  const touched = [
+    ...Object.keys(now).filter((path) => before[path] !== now[path]),
+    ...Object.keys(before).filter((path) => !(path in now)),
+  ];
+  const code = touched.filter((path) => !NOT_CODE.test(path));
+  return { code, small: code.length <= 2 && !code.some((path) => RISKY.test(path)) };
+}
+
+// Small steps: after this many code files changed with no check or test run since, the guard holds
+// the next new one until the model runs one. The kit's auth run (2026-10-28) wrote 14 code files
+// before its first type check, so a wrong early guess spread through all of them. focus.mjs keeps
+// the list (state.unchecked) and clears it on a run. Tests do not count: they are run next anyway.
+export const SMALL_STEP_FILES = 3;
+const STEP_CODE = /\.([cm]?[jt]sx?|vue|svelte)$/;
+const OUTSIDE_STEPS = /(^|\/)(node_modules|\.qwen|\.claude|\.next|dist|build)\/|\.config\.[cm]?[jt]s$/;
+export function isStepCode(rel) {
+  return STEP_CODE.test(rel) && !NOT_CODE.test(rel) && !OUTSIDE_STEPS.test(rel) && !rel.startsWith("..") && !/^[a-z]:/i.test(rel);
 }
 
 // Relative path -> "size:mtime" for every project file outside build output and dependencies.

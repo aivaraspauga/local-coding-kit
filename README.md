@@ -11,14 +11,17 @@ Tested only on Windows 11. The model and server settings below are tuned for one
 ## What it does
 
 - **No "done" until the checks pass:** type check, lint, tests and (for Next.js) the build.
+- **Tries the API routes it changed:** after the checks pass, it sends bad requests to each changed Next.js API route on the built app: broken JSON, an empty body, ids that do not exist. Each one is sent twice. A 500 error, no answer, or a different second answer means the work is not done. It sends only requests that a correct route refuses, so a working route changes no data.
+- **Small steps:** after 3 changed code files, the model must run the type check or the tests before it starts a 4th file.
 - **A second look:** a reviewer helper reads the change and finds bugs.
 - **Recipes** for common jobs: pages, forms, full-stack features, tests, debugging.
 - **Up-to-date facts:** it tells the model which installed packages are newer than its training.
 - **Safety:** it blocks force-push, recursive deletes and edits to its own rules. To allow one, reply `allow <code>`.
 - **Keeps it on track** when the model reads or searches too much.
-- **Cleans every edit** (format and lint fixes).
+- **Cleans every edit** (format and lint fixes). It also stops one `Response` object that is kept and sent for every request: only the first request gets its body.
+- **Sized to the task:** a small change (1-2 code files, nothing on the server, data or dependencies) gets a unit or component test and the checks, without the reviewer or a new e2e test. You can still ask for a review.
 
-The cost: the model takes longer to finish.
+The cost: the model takes longer to finish. The sizing above is meant to cut this for small changes; it is not measured yet. The route test, the small steps and the lower thinking limit (2026-10-29) are not measured with the model yet either.
 
 ## Use it in a project
 
@@ -88,7 +91,7 @@ None of this is needed for the kit.
 | Web search | My own [SearXNG](https://docs.searxng.org/) in Docker, through [mcp-searxng](https://github.com/ihor-sokoliuk/mcp-searxng) |
 | Speed | About 45-50 tokens per second |
 
-**Server settings:** context 102400, temperature 0.7, top-k 20, top-p 0.95, min-p 0, thinking limit 8192 tokens, reasoning effort medium, KV cache q4_0, cache-ram 0, ctx-checkpoints 4, parallel 1, n-gram guessing on, MTP off. Why each one: [backends/llama-cpp.md](backends/llama-cpp.md).
+**Server settings:** context 102400, temperature 0.7, top-k 20, top-p 0.95, min-p 0, thinking limit 4096 tokens, reasoning effort medium, KV cache q4_0, cache-ram 0, ctx-checkpoints 4, parallel 1, n-gram guessing on, MTP off. Why each one: [backends/llama-cpp.md](backends/llama-cpp.md).
 
 **Qwen Code settings** ([qwen-code/user-settings.json](qwen-code/user-settings.json)): context 102400, answer limit 24000 tokens, approval `auto-edit`, follow-up suggestions and managed memory off (each extra request slows the next answer), usage statistics off.
 

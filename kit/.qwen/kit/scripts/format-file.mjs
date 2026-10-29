@@ -1,13 +1,16 @@
 // PostToolUse hook (edit, write_file): applies the project's own ESLint fixes and Prettier to the
-// edited file, then reports ESLint errors (and Next.js mistakes no check catches) back to the agent
+// edited file, then reports ESLint errors (and mistakes no check catches: Next.js params, a Response
+// shared across requests) back to the agent
 // (exit 2) and warnings as a note, each warning once per conversation.
 // Projects without ESLint or Prettier are left alone.
 import { readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import { importFromProject, majorVersion, output, projectRoot, readInput, readState, writeState } from "./lib/project.mjs";
+import { SHARED_RESPONSE } from "./lib/risks.mjs";
 
 const ROUTE_FILE = /(^|\/)app\/(.+\/)?(page|layout|route|default|template)\.[cm]?[jt]sx?$/;
+const TEST_FILE = /(^|\/)(tests?|e2e|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 
 const input = readInput();
 const root = projectRoot();
@@ -72,6 +75,18 @@ try {
           );
         }
       });
+  }
+
+  // One Response kept in a module variable: no check fails, the first request works, and every
+  // later one gets an empty body (lib/risks.mjs).
+  if (/\.[cm]?[jt]sx?$/.test(rel) && !TEST_FILE.test(rel)) {
+    const source = readFileSync(abs, "utf8");
+    for (const match of source.matchAll(SHARED_RESPONSE)) {
+      const line = source.slice(0, match.index).split("\n").length;
+      errors.push(
+        `${rel}:${line} \`${match[1]}\` is one Response made when the module loads. Its body can be read only once, so every request after the first gets an empty body. Build a new Response in each call (a function that returns it). (shared-response)`,
+      );
+    }
   }
 
   if (errors.length > 0) {

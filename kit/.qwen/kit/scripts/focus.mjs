@@ -4,9 +4,19 @@
 // runs out. It never blocks; it adds a short note to the conversation when a threshold is crossed.
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 
-import { checkCommand, fingerprint, output, projectRoot, readInput, readState, writeState } from "./lib/project.mjs";
+import {
+  checkCommand,
+  fingerprint,
+  isStepCode,
+  MOVE_UP_COMMAND,
+  output,
+  projectRoot,
+  readInput,
+  readState,
+  writeState,
+} from "./lib/project.mjs";
 
 // A benchmark task (2026-10-11) took Qwen 17 look-ups before its first edit where Claude took 9.
 const STREAK_FIRST = 12; // look-ups in a row before the first nudge
@@ -64,7 +74,7 @@ const KNOWN_ERRORS = [
   ],
   [
     /contains files that could conflict/,
-    "The generator refuses a folder that has files in it. Run it again with a new subfolder name NAME instead of `.` (and --skip-install). Then move the files up without overwriting what is here, with this command (it works in every shell): node -e \"const fs=require('fs');const left=[];for(const f of fs.readdirSync('NAME')){if(fs.existsSync(f))left.push(f);else fs.renameSync('NAME/'+f,f)}if(left.length)console.log('Already here, left in NAME: '+left.join(', '));else{fs.rmdirSync('NAME');console.log('Moved everything')}\" Merge each file it left in NAME with the one here, delete NAME, then npm install.",
+    `The generator refuses a folder that has files in it. Run it again with a new subfolder name NAME instead of \`.\` (and --skip-install). Then move the files up without overwriting what is here, with this command (it works in every shell): ${MOVE_UP_COMMAND} Merge each file it left in NAME with the one here, delete NAME, then npm install.`,
   ],
   [
     /strict mode violation: getByLabel\(/,
@@ -77,6 +87,26 @@ const KNOWN_ERRORS = [
   [
     /TS2344: Type '"\/[^']*' does not satisfy the constraint/,
     "Next.js route types are out of date. Run `npx next typegen`, then the type check again.",
+  ],
+  // A route that was deleted or renamed (or a branch switch) leaves Next's generated validator
+  // pointing at it; a run lost minutes reading it (2026-10-28).
+  [
+    /\.next[\\/](dev[\\/])?types[\\/]\S*\.ts\(\d+,\d+\): error TS2307/,
+    "This type error is in a file Next.js generated (in `.next/`) for a route that no longer exists. Delete that one file (the path in the error), then run `npx next typegen` and the type check again. Never edit files in `.next/`.",
+  ],
+  // React 19 peer ranges (charts, editors, date pickers) and native builds on a Node version too new
+  // for prebuilt binaries: both general install blockers (pre-test review, 2026-10-28).
+  [
+    /ERESOLVE[\s\S]*peer react(-dom)?@/,
+    "ERESOLVE on a React peer: this version of the package does not list the installed React. Look up a version that does (`npm view <package> peerDependencies`, or its newest version), install that one, or choose another package. Never use --legacy-peer-deps or --force.",
+  ],
+  [
+    /gyp ERR!|node-pre-gyp|prebuild-install[^\n]*(warn|err)|Could not find any Visual Studio installation/,
+    "This package needs a native build (no prebuilt binary for this Node.js version), and that needs a C++ compiler. Use a pure JavaScript package or what Node.js has built in instead: `bcryptjs` for bcrypt, `node:sqlite` for better-sqlite3, `node:crypto` for hashing.",
+  ],
+  [
+    /EADDRINUSE[^\n]*?:(\d{2,5})|[Pp]ort (\d{2,5}) is (already )?in use/,
+    "Another program already uses that port. Do not stop it: it is not part of this project. Start the dev server on a free port (`npm run dev -- --port 3100`), and point the tests at the same port.",
   ],
 ];
 
@@ -147,7 +177,7 @@ if (web) {
   if (n === WEB_FIRST || (n > WEB_FIRST && (n - WEB_FIRST) % WEB_EVERY === 0)) {
     notes.push(
       `You have searched or read the web ${n} times since you last changed or ran anything. ` +
-        "Write down in two lines what you found, then act on it. Prefer the installed package's docs and types for exact APIs; if the web has not answered the question, ask the user.",
+        "Write down in two lines what you found, then act on it. Prefer the installed package's docs and types for exact APIs. If the web has not answered the question, make the simplest choice, check it by running the code, and name it in your report.",
     );
   }
 }
@@ -165,7 +195,7 @@ if (lookedUp) {
       `You have made ${state.streak} look-ups in a row without changing or running anything. ` +
         "Write down in two lines what you know and the first file to change, then make that edit now; " +
         "decide the other edits one at a time, not all at once in your head. " +
-        "If you cannot decide without the user, ask them one short question.",
+        "Cannot decide? Take the simpler option, name it in your report, and let the checks tell you if it was wrong.",
     );
   }
   if (/node_modules\//.test(text) && !CHEAP_DOCS.test(text)) {
@@ -232,6 +262,22 @@ if (shell && RUNS.test(text) && TEST_RUN.test(text) && !inSubagent) {
       "That run failed, but the pipe through head, tail or grep made it exit 0 and may have cut the error off. While tests or checks fail, run them without a pipe, so you see the whole error in one run; long output is saved to a file you can read with read_file.",
     );
   }
+}
+
+// Small steps (the guard enforces them): the code files changed since the last check, test or build
+// run. Any such run clears the list, passing or not: the model has seen what its changes do.
+if (!inSubagent && (tool === "Edit" || tool === "Write") && event === "PostToolUse") {
+  const root = projectRoot();
+  const rel = relative(root, resolve(root, String(params.file_path ?? ""))).replaceAll("\\", "/");
+  const projectState = readState(root, input.session_id);
+  const unchecked = projectState.unchecked ?? [];
+  if (isStepCode(rel) && !unchecked.includes(rel)) {
+    writeState(root, input.session_id, { ...projectState, unchecked: [...unchecked, rel] });
+  }
+} else if (shell && RUNS.test(text) && (TEST_RUN.test(text) || /build/.test(text)) && !input.is_interrupt) {
+  const root = projectRoot();
+  const projectState = readState(root, input.session_id);
+  if (projectState.unchecked?.length) writeState(root, input.session_id, { ...projectState, unchecked: [] });
 }
 
 // Long thinking in the step that made this call: once per message.

@@ -44,6 +44,12 @@ Every interactive element has hover, `focus-visible`, active and `disabled` styl
   @custom-variant dark (&:where(.dark, .dark *));
   ```
 
+  With a class, nothing follows the system any more, so do all three:
+  - Colours that a `@media (prefers-color-scheme: dark)` block sets (create-next-app writes one for `--background` and `--foreground`) move to `.dark { ... }`. Otherwise the toggle changes the `dark:` classes but not the page background.
+  - With no saved choice, set the class from `matchMedia("(prefers-color-scheme: dark)")`. Do it in a small inline script in `<head>`, before the page paints, so it does not flash light first.
+  - Put `suppressHydrationWarning` on `<html>`: the class differs between the server's HTML and the browser.
+- Charts: a chart in a responsive wrapper (Recharts `ResponsiveContainer`, Chart.js with `responsive`) takes its parent's size. Give the parent a height (`h-80`), or the chart is 0 px tall and invisible. Chart components run in the browser (`"use client"`).
+
 ## 6. Tailwind CSS v4 specifics
 
 - Configuration lives in CSS, not `tailwind.config.js`: `@import "tailwindcss";` then tokens in `@theme { --color-brand: oklch(0.6 0.2 250); }`, which creates `bg-brand`, `text-brand` and so on. `@theme inline` points tokens at other CSS variables (how shadcn/ui and create-next-app set up themes).

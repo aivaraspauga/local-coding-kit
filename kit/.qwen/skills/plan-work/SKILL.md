@@ -13,7 +13,7 @@ If `.local-agent/plan.md` exists and matches the user's request (an earlier sess
 ## 1. Pin down the goal
 - Write the goal in one sentence, in the user's terms ("people can tag tasks and filter by a tag").
 - List what "done" looks like as 2 to 5 observable checks ("a tag typed when adding a task shows as a chip", "clicking a chip shows only tasks with that tag", "tags survive a reload", "the project's checks pass").
-- If a choice changes the result and the user would care (which pages, which data is stored, what happens on error), ask one short question. For small choices, pick a sensible default and say so in one line.
+- Choices the request leaves open (which pages, which data is stored, what happens on error): pick a sensible default, write it in the plan and name it in one line to the user, then go on. Ask only when a wrong guess would lose data or you need something only the user has (a key, an account, a hosting choice).
 
 ## 2. Scope the smallest complete version
 - For a loose request, build the smallest version that does the whole job end to end before adding extras.
@@ -24,7 +24,7 @@ If `.local-agent/plan.md` exists and matches the user's request (an earlier sess
 - **Checkpoint.** If the project uses git, run `git status`. If there are uncommitted changes, tell the user and suggest committing them (or working on a new branch) before a big change, so it is easy to undo. Do not commit or create branches unless the user asks you to.
 
 ## 4. Write the plan to `.local-agent/plan.md`
-If the project uses git and `.gitignore` does not mention `.local-agent/`, ask the user once whether to add it: the plan is working notes, and most people do not want it committed.
+The kit's setup adds `.local-agent/` to `.gitignore` in a git project: the plan is working notes, not part of the code. If the line is missing, add it and say so in your report.
 
 Steps go in dependency order (data, then server, then UI, then tests), 3 to 8 of them, each naming its files and ending with a check you can run:
 

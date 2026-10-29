@@ -1,5 +1,6 @@
-// PreToolUse hook (shell, edit, write): blocks or asks before risky actions, whichever model is
-// driving. Rules cover bash, cmd and PowerShell spellings.
+// PreToolUse hook (shell, edit, write, agent): blocks or asks before risky actions, whichever model
+// is driving. Rules cover bash, cmd and PowerShell spellings. It also turns away the reviewer on a
+// small change, and holds a new code file until the last few changed ones were checked.
 // The user can lift a block from the chat: it names a short code, and "allow <code>" in the user's
 // next message (recorded by reminder.mjs) lets that exact command, or changes to that file, through
 // for the rest of the conversation. In Qwen Code's YOLO mode an "ask" reaches no one and works as a
@@ -10,7 +11,18 @@ import { tmpdir } from "node:os";
 import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CHECK_CONFIGS, output, projectRoot, readInput, readState, writeState } from "./lib/project.mjs";
+import {
+  changeSize,
+  CHECK_CONFIGS,
+  checkCommand,
+  isStepCode,
+  output,
+  projectRoot,
+  readInput,
+  readState,
+  SMALL_STEP_FILES,
+  writeState,
+} from "./lib/project.mjs";
 
 const input = readInput();
 const root = projectRoot();
@@ -188,5 +200,31 @@ if (tool === "Bash") {
   const named = (state.named ?? []).includes(basename(rel).toLowerCase());
   if (CHECK_CONFIGS.test(rel) && !isNewConfig && !madeThisSession && !named) {
     block("ask", `${rel} controls what the project's checks enforce; the user should approve this change.`, key);
+  }
+  // Small steps: a new code file waits while SMALL_STEP_FILES others have no check run since they
+  // changed (focus.mjs keeps the list). More edits to those files are fine. Not inside a helper agent,
+  // and not in a project with nothing to run.
+  const unchecked = state.unchecked ?? [];
+  if (!input.agent_id && unchecked.length >= SMALL_STEP_FILES && isStepCode(rel) && !unchecked.includes(rel)) {
+    const command = checkCommand(root);
+    if (command) {
+      decide(
+        "deny",
+        `You changed ${unchecked.join(", ")} and have run no check since. Work in small steps: run the type check (or the tests for these files) now, fix what it finds, then make this change. (The full check command is \`${command}\`; one part of it is enough here.)`,
+      );
+    }
+  }
+} else if (tool === "Agent" && String(params.subagent_type ?? "").toLowerCase() === "reviewer") {
+  // A small change gets no reviewer: on a two-file bug fix it took 5.9 of the run's 13.8 minutes and
+  // found nothing, while the run without the kit made the same fix in 2.5 (2026-10-28). Server,
+  // data and dependency changes keep it; so does a review the user asked for.
+  if (state.startFiles && !state.reviewAsked) {
+    const { code, small } = changeSize(root, state.startFiles);
+    if (small) {
+      decide(
+        "deny",
+        `This change is small (${code.length ? code.join(", ") : "no code files"}), so it needs no reviewer. Read your own diff once for leftovers and for any part of the request that is missing, then report.`,
+      );
+    }
   }
 }

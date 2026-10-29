@@ -1,6 +1,7 @@
 // SessionStart hook: gives the model the working-style rules and this project's check command.
 // It also runs after a compaction, so the rules survive when the conversation is summarized.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +13,7 @@ import {
   ignoreKitInPrettier,
   KIT_DIR,
   majorVersion,
+  MOVE_UP_COMMAND,
   output,
   PLAN_FILE,
   planSignature,
@@ -52,6 +54,20 @@ const fullStyle = readFileSync(join(kitRoot, "prompt", "working-style.md"), "utf
 const style =
   process.env.LOCAL_AGENT_STE === "0" ? fullStyle.replace(/## Messages to the user\n[\s\S]*?\n(?=## )/, "") : fullStyle;
 
+// True when something already listens on the port (IPv4 or the dual-stack default).
+const portInUse = (port) =>
+  Promise.all(
+    [undefined, "127.0.0.1"].map(
+      (host) =>
+        new Promise((resolve) => {
+          const server = createServer();
+          server.once("error", (error) => resolve(error.code === "EADDRINUSE"));
+          server.once("listening", () => server.close(() => resolve(false)));
+          server.listen(port, host);
+        }),
+    ),
+  ).then((results) => results.some(Boolean));
+
 const facts = [];
 const check = checkCommand(root);
 facts.push(
@@ -62,6 +78,14 @@ facts.push(
 if (prettierIgnored) {
   facts.push(
     `The kit just added \`${KIT_DIR}/\` to \`.prettierignore\`, so Prettier skips the kit's own files. Mention this once in your report.`,
+  );
+}
+// A new project: nothing here but the kit. Generators refuse a folder with files in it, and the
+// kit's own files are such files; the model only learned that from a failed run (2026-10-28 review).
+const KIT_ONLY = new Set([".git", ".gitignore", ".gitattributes", KIT_DIR, "QWEN.md", ".local-agent", ".prettierignore", ".vscode", ".idea"]);
+if (!existsSync(join(root, "package.json")) && readdirSync(root).every((name) => KIT_ONLY.has(name))) {
+  facts.push(
+    `This folder has no app yet, only the kit's files. App generators (create-next-app, create vite, ...) refuse a folder with files in it, so create the app in a subfolder NAME (\`npx create-next-app@latest NAME --yes --skip-install\`, plus the options you need), then move it up with this command (it works in every shell): ${MOVE_UP_COMMAND} Then run npm install.`,
   );
 }
 if (!existsSync(join(root, "AGENTS.md"))) {
@@ -97,6 +121,15 @@ if (nextMajor > 0 && agentNotes.includes("This is NOT the Next.js you know")) {
 if (nextMajor > 0 && deps["@playwright/test"]) {
   facts.push(
     "Playwright with Next.js: once a page hydrates it has a hidden route announcer with `role=\"alert\"`, so `page.getByRole(\"alert\")` matches two elements and fails (it can pass on a fast run, then fail). `getByRole(\"alert\", { name: \"...\" })` finds nothing: an alert's name doesn't come from its text. Use `page.getByRole(\"alert\").filter({ hasText: \"...\" })`.",
+  );
+}
+// The app's usual port taken by another program: Playwright's webServer with reuseExistingServer
+// then tests that program. Both sides of a kit vs no-kit run lost their first e2e run to an app on
+// port 3000 (2026-10-28).
+const appPort = nextMajor > 0 || deps.nuxt ? 3000 : deps["@angular/core"] ? 4200 : deps.vite ? 5173 : null;
+if (appPort && (await portInUse(appPort))) {
+  facts.push(
+    `Port ${appPort} is already in use on this PC (another program, or a server left running). Start the dev server on a free port (\`npm run dev -- --port 3100\`) and run the app's tests against that port${deps["@playwright/test"] ? `; a Playwright config with \`reuseExistingServer\` would otherwise test whatever answers on ${appPort}` : ""}. Do not stop a program you did not start.`,
   );
 }
 const shadcnStyle = readJson(join(root, "components.json"))?.style ?? "";

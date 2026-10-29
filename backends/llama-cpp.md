@@ -21,7 +21,7 @@ ubatch-size = 256
 parallel = 1
 jinja = true
 chat-template-file = launcher\qwen3.8-chat-template.jinja
-reasoning-budget = 8192
+reasoning-budget = 4096
 reasoning-effort = medium
 temp = 0.7
 top-k = 20
@@ -48,7 +48,7 @@ llama-server --models-preset launcher\models.generated.ini --models-max 1 --host
 | `parallel = 1` | One request at a time, with the full context. |
 | `jinja = true` | The model needs this to use tools. |
 | `chat-template-file` | The chat template of the model, with one correction. Some clients send hook notes as system messages during a conversation (Claude Code did). The original template refuses these messages ("System message must be at the beginning"), so each request failed. To change it, use `LLAMA_CHAT_TEMPLATE_FILE` (empty = the template of the model). |
-| `reasoning-budget = 8192` | Sets a limit for each thought. Without it, the model can think for a very long time. |
+| `reasoning-budget = 4096` | Sets a limit for each thought. Without it, the model can think for a very long time. It was 8192 until 2026-10-29. The model often wrote whole files in its thinking before it wrote them for real, so the limit is now lower. This is not measured yet. If results get worse, set `LLAMA_THINKING_BUDGET=8192` in `config.cmd`. |
 | `reasoning-effort = medium` | The server sends this value to the chat template: `xhigh`, `medium` or `low`. See the text below this table. |
 | `temp = 0.7` | Qwen recommends 1.0. With 0.7, the model wrote approximately 30% fewer tokens and finished faster, with the same test result (2026-10-24, 1 run for each setting). To change it, use `LLAMA_TEMP`. |
 | `top-k`, `top-p`, `min-p` | The values that Qwen recommends ([model card](https://huggingface.co/Qwen/Qwen3.8-27B-FP8)). |

@@ -1,6 +1,8 @@
 // Stop hook: the agent may not finish while the project's checks fail, and gets one reminder to
 // review what it changed: debugging leftovers (temporary scripts, console.log, .only) and risky
 // lines (secrets, silenced errors, raw HTML, SQL from strings, a changed AGENTS.md; lib/risks.mjs).
+// Once the checks pass, bad requests go to the API routes the session changed (lib/probe.mjs), and a
+// route that crashes on one blocks like a failing check.
 // Runs only when project files changed since the session started (or since the last pass), so a
 // question in a project with existing failures is not blocked. Skips the run when the model's own
 // run of the check command passed on the same files (focus.mjs records it). Re-runs a failing test
@@ -12,6 +14,7 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { findLeftovers } from "./lib/leftovers.mjs";
+import { probeRoutes, routesToProbe } from "./lib/probe.mjs";
 import { findRisks } from "./lib/risks.mjs";
 import {
   changedFiles,
@@ -28,6 +31,7 @@ import {
 } from "./lib/project.mjs";
 
 const MAX_BLOCKS = 3;
+const MAX_PROBE_BLOCKS = 2;
 // Files that hold notes for the agent or the tools, not code.
 const NOTES_ONLY = /^(QWEN|AGENTS|CLAUDE)\.md$|^\.(gitignore|prettierignore)$/;
 const MAX_PLAN_STEPS_SHOWN = 6;
@@ -131,6 +135,42 @@ function finish(message) {
   process.exit(0);
 }
 
+// After the checks pass: bad requests to the API routes this session changed, on the build the
+// checks just made. Judged once per set of files; a crash blocks at most MAX_PROBE_BLOCKS times.
+async function probeThenFinish(message) {
+  let result = null;
+  if (state.startFiles && state.probed !== now) {
+    try {
+      const routes = routesToProbe(root, changedFiles(root, state.startFiles));
+      if (routes) result = await probeRoutes(root, routes);
+    } catch {
+      result = null; // the probe must never block on its own failure
+    }
+  }
+  if (result?.problems.length) {
+    const blocks = (state.probeBlocks ?? 0) + 1;
+    if (blocks <= MAX_PROBE_BLOCKS) {
+      writeState(root, input.session_id, { ...state, failures: 0, probeBlocks: blocks });
+      console.error(
+        [
+          `The checks pass, but bad requests to the API routes you changed went wrong (sent twice each to the built app, \`next start\`; attempt ${blocks} of ${MAX_PROBE_BLOCKS}). You are not done yet.`,
+          ...result.problems.map((problem) => `- ${problem}`),
+          "A bad request must get a 4xx answer with a message, never a 500 or a hang, and the same request must get the same answer every time: parse the body in a try/catch, validate it (and ids from the path), and build a new Response in each call. Add a test for each case, then run the checks again.",
+          REPORT_AGAIN,
+          ...(result.log ? ["", "The app's log while it answered:", result.log] : []),
+        ].join("\n"),
+      );
+      process.exit(2);
+    }
+    message = `${message}. Bad requests still crash some changed API routes after ${MAX_PROBE_BLOCKS} attempts: ${result.problems.join("; ")}`;
+  } else if (result) {
+    message = `${message}; ${result.sent} bad requests to the changed API routes got a proper answer`;
+  }
+  state.probed = now;
+  state.probeBlocks = 0;
+  finish(message);
+}
+
 if (!command) finish(null);
 // A kit setup, update or removal, or a lesson in AGENTS.md, changes no code, so the checks would
 // only repeat the last result: a removal ran typecheck, lint, tests and the build (2026-10-28).
@@ -144,7 +184,7 @@ if (state.startFiles) {
 }
 // The model's own passing run of this command on these same files (recorded by focus.mjs) counts:
 // a benchmark run spent 20-60 s per task repeating it here. Any change since then means a new run.
-if (now === state.modelPassed) finish(`Checks passed (\`${command}\`, your own run on these same files)`);
+if (now === state.modelPassed) await probeThenFinish(`Checks passed (\`${command}\`, your own run on these same files)`);
 
 let run = runCheck();
 let flaky = false;
@@ -156,7 +196,7 @@ if (run.status !== 0 && !SAME_EVERY_TIME.test(`${run.stdout ?? ""}${run.stderr ?
 }
 
 if (run.status === 0) {
-  finish(
+  await probeThenFinish(
     flaky
       ? `Checks passed on a second run (\`${command}\`; the first run failed, possibly a flaky test)`
       : `Checks passed (\`${command}\`)`,

@@ -30,11 +30,14 @@ For an API you're unsure of, read its guide in `node_modules/next/dist/docs/` (i
 
 ## Pages and state
 - Every page gets a unique `title` and `description` (`export const metadata`, or `generateMetadata` with the same `params` Promise) in a server file.
+- After log-in, log-out or sign-up, the layout still shows the old session: a client navigation (`router.push`, `router.replace`) keeps the already-rendered layout. Call `router.refresh()` after it, or load the page in full (`window.location.assign("/")`).
 - Saved data lives on the server; after a change refresh it (`updateTag`/`revalidatePath` in a Server Action, or `router.refresh()`) instead of copying it into client state. Filters, search, sort and tabs go in the URL. No new state library unless the project has one.
 
 ## Data
 - Load data in Server Components or route handlers, not with `useEffect` + fetch, unless the project already does that or the data is user-interactive.
-- Route handlers: `app/api/<name>/route.ts` exporting `GET`, `POST`, ... that return `Response.json(...)` (or `NextResponse.json`). Validate input and return 400 on bad input.
+- Route handlers: `app/api/<name>/route.ts` exporting `GET`, `POST`, ... that return `Response.json(...)` (or `NextResponse.json`). Validate input and return 400 on bad input: `await request.json()` throws on a body that is not JSON, so catch that too (otherwise it is a 500). Trim text before you check its length. Build a new `Response` in each call; one kept in a module variable has its body used up after the first request.
+- CSV: never split lines on commas. Write fields that hold a comma, a quote or a line break in double quotes, with quotes doubled (`"Fix ""this"", now"`), and read with a quote-aware parser (`papaparse`). A download comes from a route handler with `Content-Type: text/csv` and `Content-Disposition: attachment; filename="tasks.csv"`.
+- Uploaded files: `next start` serves only what was in `public/` when it started, so a file saved there later is a 404 in production (`next dev` shows it, so it looks fine). Save uploads outside `public/` (`data/uploads/<a name you generate>`) and serve them from a route handler with the file's `Content-Type`.
 - Server Actions: functions in a `"use server"` file, called from forms or client components. Re-validate input on the server.
 - Data in a file (JSON, SQLite) at a path made from `process.cwd()`: `next build` warns "Dynamic filesystem access causes tracing of the whole project". Mark the path: `path.join(/*turbopackIgnore: true*/ process.cwd(), "data", "orders.json")`. Read the path from an env variable first (`process.env.ORDERS_FILE ?? ...`), so tests can use their own file (Playwright: `webServer.env`) and never touch the real data.
 

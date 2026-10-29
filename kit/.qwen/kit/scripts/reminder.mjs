@@ -2,7 +2,8 @@
 // lose track of long instructions as the conversation grows. Requests that look big or vague also
 // get a nudge to plan first. It also notes for the other hooks what only the user's own words can
 // say: blocks the user allows (guard.mjs), config files the message names (guard.mjs), whether the
-// user asked to remove the kit (guard.mjs), and whether the message only asks a question (focus.mjs).
+// user asked to remove the kit or for a review (guard.mjs), and whether the message only asks a
+// question (focus.mjs).
 import { basename } from "node:path";
 
 import { CHECK_CONFIGS, output, projectRoot, readInput, readState, writeState } from "./lib/project.mjs";
@@ -38,7 +39,9 @@ const question = QUESTION.test(prompt) && !CHANGE.test(prompt);
 // "Remove the coding kit from this project": the guard then lets the kit's own removal script run.
 // It stays for the conversation, since the model may first ask about changed files.
 const removeKit = Boolean(state.removeKit) || /\b(remove|uninstall|delete|take out|get rid of)\b[^.?!\n]{0,40}\bkit\b/i.test(prompt);
-writeState(root, input.session_id, { ...state, pending, allowed: [...allowed], named: [...named], question, removeKit });
+// "Review it", "use the reviewer": the guard then lets the reviewer run on a small change too.
+const reviewAsked = Boolean(state.reviewAsked) || /\b(review(er)?|second look|fresh eyes)\b/i.test(prompt);
+writeState(root, input.session_id, { ...state, pending, allowed: [...allowed], named: [...named], question, removeKit, reviewAsked });
 
 // Signs of a request that needs a plan: building a whole new app or system, or several asks or a
 // long description that doesn't yet say what exactly to build. One page or component ("add a
@@ -80,7 +83,7 @@ const lines = [
   "Checklist for this request:",
   "1. Restate the goal. Read the files involved first; follow a matching skill or the project's AGENTS.md.",
   "2. Smallest change, one step at a time. Look up libraries in docs and types, not compiled node_modules code.",
-  "3. Verify by running the checks (and the app, for UI). Report what you changed and how you verified it.",
+  "3. Verify by running the checks (and the app, for a new page or flow). A small change (1-2 code files, nothing on the server, data or dependencies) needs only its unit or component test: no e2e test, no reviewer. Report what you changed and how you verified it.",
 ];
 lines.push(
   hard
@@ -91,6 +94,12 @@ if (needsPlan) {
   lines.push(
     "This request looks big or open-ended: use the `plan-work` skill first (goal, done checks, smallest complete version, 3-8 steps), then work through the steps.",
   );
+}
+// Accounts, log-in, permissions and uploads are where a slip is a security hole. The working style
+// names the `security` skill, but an "add accounts" run loaded only the framework skill and wrote its
+// own password hashing (2026-10-28).
+if (/\b(log.?in|log.?out|sign.?up|sign.?in|accounts?|passwords?|auth\w*|permissions?|roles?|admins?|sessions?|uploads?|attach\w*)\b/i.test(prompt)) {
+  lines.push("This touches accounts, log-in, permissions or uploads: load the `security` skill before you write that code, and follow it.");
 }
 for (const key of newlyAllowed) {
   lines.push(`The user allowed this for the rest of the conversation: ${key.startsWith("file ") ? `changes to \`${key.slice(5)}\`` : `\`${key}\``}. Run it again unchanged.`);

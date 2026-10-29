@@ -1,6 +1,6 @@
 // Finds risky lines a session added: secrets in code, secrets exposed to the browser, silenced
-// errors, raw HTML, eval, SQL built from strings, switched-off TLS checks, an `.env` file git would
-// commit, and a changed AGENTS.md (whose new lines must have a source). Only added lines count (git
+// errors, raw HTML, eval, SQL built from strings, switched-off TLS checks, a fast hash for passwords,
+// an `.env` file git would commit, and a changed AGENTS.md (whose new lines must have a source). Only added lines count (git
 // diff, or whole files that are new this session), so existing code is never flagged. Patterns are
 // kept narrow: each finding is a reminder to look, shown once, not proof of a bug.
 import { spawnSync } from "node:child_process";
@@ -81,6 +81,21 @@ const MUTATION_ENDPOINT = /export\s+(async\s+)?(function|const)\s+(POST|PUT|PATC
 const AUTH_SIGN =
   /\b(auth|getSession|getServerSession|currentUser|getCurrentUser|getUser|requireUser|requireAuth|requireAdmin|requireRole|verifySession|verifyToken|validateRequest|withAuth|checkPermission|authorize)\s*\(|\bsupabase\.auth\./;
 
+// The login system's own endpoints are public by design: flagging sign-up, log-in and log-out cost a
+// run a round of explaining (2026-10-28).
+const AUTH_ENTRY =
+  /(^|\/)(auth|login|log-in|logout|log-out|signin|sign-in|signout|sign-out|signup|sign-up|register|forgot-password|reset-password)(\/|\.|$)/i;
+
+// A Response with a body made once, when the module loads, and returned by every request: its body
+// can be read only once, so every answer after the first is empty. The 2026-10-28 kit run shipped
+// one (a 409 for duplicate names) and its reviewer missed it. Matched over the whole file, because
+// Prettier may put the value on the next line. format-file.mjs reports it as an error.
+export const SHARED_RESPONSE =
+  /^(?:export\s+)?(?:const|let|var)\s+(\w+)(?:\s*:[^=\n]+)?\s*=\s*(?:new\s+(?:Next)?Response\s*\((?!\s*(?:null|undefined)?\s*[,)])|(?:Next)?Response\.json\s*\()/gm;
+// A fast hash (md5, sha*) in a file that handles passwords: a leaked table is cracked in hours.
+const FAST_HASH = /\bcreateHash\(\s*["'`](md5|sha1|sha256|sha384|sha512)["'`]/i;
+const PASSWORD = /password|passwd/i;
+
 function secretIn(line) {
   if (TOKEN_FORMATS.some((format) => format.test(line))) return true;
   const match = SECRET_ASSIGNMENT.exec(line);
@@ -137,9 +152,15 @@ export function findRisks(root, changed, startFiles = {}) {
       }
       if (hit) findings.push(`${path}: ${label} (\`${hit.trim().slice(0, 80)}\`)`);
     }
+    const hash = !env && !TEST_FILE.test(path) && lines.find((line) => FAST_HASH.test(line));
+    if (hash && PASSWORD.test(readLines(root, path).join("\n"))) {
+      findings.push(
+        `${path}: a fast hash in a file that handles passwords (\`${hash.trim().slice(0, 80)}\`; use \`bcryptjs\`, or \`scrypt\` with a random salt per user and \`timingSafeEqual\`, as the \`security\` skill shows)`,
+      );
+    }
     // A new data-changing endpoint, and nothing in its file that checks who is calling. The check
     // may live in the server function it calls; then the model says so instead of adding one.
-    if (!env && !TEST_FILE.test(path) && MUTATION_ENDPOINT.test(lines.join("\n"))) {
+    if (!env && !TEST_FILE.test(path) && !AUTH_ENTRY.test(path) && MUTATION_ENDPOINT.test(lines.join("\n"))) {
       const file = readLines(root, path).join("\n");
       if (!AUTH_SIGN.test(file)) {
         findings.push(

@@ -19,7 +19,7 @@ Thinking is the slowest part of your work.
 5. When a skill and the existing code disagree, the existing code wins.
 
 ## 1. Understand
-- Restate the goal in one sentence. Two reasonable meanings: ask one short question. Say so if a simpler approach exists.
+- Restate the goal in one sentence. Two reasonable meanings: take the likelier one, say so in one line, and go on. Ask only when a wrong guess would lose data or you need something only the user has (a key, an account, a hosting choice). Say so if a simpler approach exists.
 - Loose request ("make me a ..."): pick sensible defaults, name them in one line, build the smallest complete version.
 - Done means the project's checks pass and the change does what was asked.
 - The user's words beat a framework's favourite pattern ("no backend" means client-only).
@@ -42,6 +42,8 @@ Thinking is the slowest part of your work.
 
 ## 4. Change
 - Big work (several features, "build me an app"): `plan-work`, then one step at a time. One page, component, endpoint or fix needs no plan.
+- Small steps: change at most 3 code files (tests not counted), then run the type check or their tests before the next file. The guard holds a 4th new file until you do.
+- Small change (1-2 code files, no new route, page, table or package, nothing on the server, data or auth): fix it, add a unit or component test, run the checks once, report. No e2e test, no page check, no reviewer.
 - Smallest change that solves the task. No refactors or renames you weren't asked for, no handling of impossible cases. If 200 lines could be 50, rewrite it.
 - Remove what your change made unused; mention other dead code instead of deleting it.
 - Add tests next to the existing ones, in their style. A test does the main action (submit, save) and checks the result. Never change a feature to suit a test.
@@ -49,7 +51,8 @@ Thinking is the slowest part of your work.
 ## 5. Verify
 - While working, run only the tests for what you changed (one file or one test name, through the project's runner; the framework skill names the command). Run the full check command once at the end, exactly as named below, and read all of it.
 - While anything fails, run it without `| head`, `| tail` or `| grep`: a pipe hides the failure and cuts the error.
-- For new or changed UI, use the page once: add the feature to an e2e test and run it (click through, try a wrong input), or, without e2e tests, start the dev server and request the page in one command. A fix that a test or the checks prove (a type error, a failing test now passing, server or library code with a new test) needs no page check.
+- For a new page, form or flow, use the page once: add it to an e2e test and run it (click through, try a wrong input), or, without e2e tests, start the dev server and request the page in one command. A small change, or one that a unit, component or check proves (a type error, a failing test now passing, a component test of the new behaviour), needs no page check and no new e2e test.
+- API routes you changed: when the checks pass, the Stop hook sends each one bad requests twice (a body that is not JSON, an empty or `null` body, ids that do not exist, odd query values). Each must get a 4xx with a message, never a 500, and the same answer both times.
 - Fix the cause of the first error. Never silence it (`@ts-ignore`, `eslint-disable`, skipped tests, weaker config).
 - An e2e test that changes data first creates its own (a new item with a unique name, like `Rename me ${Date.now()}`): the dev database keeps seeded rows and earlier runs' changes.
 - Passes alone, fails with the others: a flaky test. Look at what tests share (database rows, a dev server, timing, a click before hydration).
@@ -58,7 +61,7 @@ Thinking is the slowest part of your work.
 
 ## 6. Report
 - Re-read the user's request and check each part of it (every field, state, page, rule and wording it names) against what you built and verified. Finish what is missing before you report.
-- After the checks pass on a change that adds or changes behaviour (a feature, logic, an API, data), ask the `reviewer` agent for a fresh look: give it the request and the changed files. It names at most 5 real defects, each with its fix: apply them without weighing them again (or say in your report why one stays), then run the check command once more, and the page check only if the UI changed. Skip it for text, styles, renames and one-line fixes.
+- After the checks pass on a change that is not small (3 or more code files, or a route, Server Action, query, data write or auth change), ask the `reviewer` agent for a fresh look: give it the request and the changed files. It names at most 5 real defects, each with its fix: apply them without weighing them again (or say in your report why one stays), then run the check command once more, and the page check only if the UI changed. Skip it for small changes, text, styles and renames (the guard turns it away on a small change).
 - Review your own diff: debugging leftovers, changes outside the task.
 - Report what you changed, how you verified it (command and result) and what you couldn't check. Only claim what you saw work.
 - You hit a non-obvious problem in the project or a library and solved it (you saw its error; a framework pitfall, a needed flag, files that change together; not a slip in your own code or tests): add one line to "Lessons" in AGENTS.md, naming the package version and the error or docs file. Nothing like that happened: skip it. A lesson that says a common tool does not work as documented (`fill()` does nothing, a prop is ignored) is almost always your own bug: write it only after a new, minimal file shows the same problem. A problem of this PC, not of the project (another app on a port, a local path), goes in your report, not in AGENTS.md.

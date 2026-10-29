@@ -20,7 +20,10 @@ rem (min of 85% and the window less 33K). Each 1K costs ~6 MB of card memory; 16
 rem Keep qwen-code\user-settings.json (contextWindowSize) and LOCAL_AGENT_CONTEXT in step with it.
 set "LLAMA_CONTEXT=102400"
 rem Caps each thought. Without it, recent llama.cpp builds let this model think without limit.
-set "LLAMA_THINKING_BUDGET=8192"
+rem 4096 since 2026-10-29 (was 8192): in the kit's auth run 4 thoughts held 70% of all thinking,
+rem most of it code drafted before it was written. Not yet measured at 4096: set 8192 in
+rem config.cmd if runs get worse.
+set "LLAMA_THINKING_BUDGET=4096"
 rem How hard the coding model thinks: xhigh, medium or low, passed to the chat template. medium adds
 rem no instruction; the kit's prompt hook then asks for careful thought on bugs, failures, design
 rem questions and big requests, and for short thoughts on clear ones. Empty = the template's default,
