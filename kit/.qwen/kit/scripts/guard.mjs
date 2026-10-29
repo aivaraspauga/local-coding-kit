@@ -15,12 +15,10 @@ import {
   changeSize,
   CHECK_CONFIGS,
   checkCommand,
-  isStepCode,
   output,
   projectRoot,
   readInput,
   readState,
-  SMALL_STEP_FILES,
   writeState,
 } from "./lib/project.mjs";
 
@@ -201,19 +199,9 @@ if (tool === "Bash") {
   if (CHECK_CONFIGS.test(rel) && !isNewConfig && !madeThisSession && !named) {
     block("ask", `${rel} controls what the project's checks enforce; the user should approve this change.`, key);
   }
-  // Small steps: a new code file waits while SMALL_STEP_FILES others have no check run since they
-  // changed (focus.mjs keeps the list). More edits to those files are fine. Not inside a helper agent,
-  // and not in a project with nothing to run.
-  const unchecked = state.unchecked ?? [];
-  if (!input.agent_id && unchecked.length >= SMALL_STEP_FILES && isStepCode(rel) && !unchecked.includes(rel)) {
-    const command = checkCommand(root);
-    if (command) {
-      decide(
-        "deny",
-        `You changed ${unchecked.join(", ")} and have run no check since. Work in small steps: run the type check (or the tests for these files) now, fix what it finds, then make this change. (The full check command is \`${command}\`; one part of it is enough here.)`,
-      );
-    }
-  }
+  // Small steps are a reminder after the write (focus.mjs), not a refusal here. The model writes
+  // files in batches of parallel calls and did not notice which ones were refused: a 03-auth run
+  // (2026-10-29) lost 19 writes, believed them done, and timed out at 2/9 rebuilding them.
 } else if (tool === "Agent" && String(params.subagent_type ?? "").toLowerCase() === "reviewer") {
   // A small change gets no reviewer: on a two-file bug fix it took 5.9 of the run's 13.8 minutes and
   // found nothing, while the run without the kit made the same fix in 2.5 (2026-10-28). Server,

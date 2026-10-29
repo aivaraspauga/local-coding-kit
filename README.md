@@ -12,7 +12,7 @@ Tested only on Windows 11. The model and server settings below are tuned for one
 
 - **No "done" until the checks pass:** type check, lint, tests and (for Next.js) the build.
 - **Tries the API routes it changed:** after the checks pass, it sends bad requests to each changed Next.js API route on the built app: broken JSON, an empty body, ids that do not exist. Each one is sent twice. A 500 error, no answer, or a different second answer means the work is not done. It sends only requests that a correct route refuses, so a working route changes no data.
-- **Small steps:** after 3 changed code files, the model must run the type check or the tests before it starts a 4th file.
+- **Small steps:** after 3 changed code files with no type check or test run, the model gets a reminder to run one before the next file.
 - **A second look:** a reviewer helper reads the change and finds bugs.
 - **Recipes** for common jobs: pages, forms, full-stack features, tests, debugging.
 - **Up-to-date facts:** it tells the model which installed packages are newer than its training.

@@ -1,5 +1,6 @@
 // Finds risky lines a session added: secrets in code, secrets exposed to the browser, silenced
 // errors, raw HTML, eval, SQL built from strings, switched-off TLS checks, a fast hash for passwords,
+// a password hash compared with ===,
 // an `.env` file git would commit, and a changed AGENTS.md (whose new lines must have a source). Only added lines count (git
 // diff, or whole files that are new this session), so existing code is never flagged. Patterns are
 // kept narrow: each finding is a reminder to look, shown once, not proof of a bug.
@@ -95,6 +96,18 @@ export const SHARED_RESPONSE =
 // A fast hash (md5, sha*) in a file that handles passwords: a leaked table is cracked in hours.
 const FAST_HASH = /\bcreateHash\(\s*["'`](md5|sha1|sha256|sha384|sha512)["'`]/i;
 const PASSWORD = /password|passwd/i;
+// A password hash compared with == / ===: the time it takes tells an attacker how much matched.
+// Node's own scrypt is fine (the `security` skill shows it with timingSafeEqual); this catches the
+// one slip in it. A hash next to null, a literal, `typeof` or `.length` is not a comparison of hashes.
+// An operand may be a chain of calls: `scryptSync(password, salt, 64).toString("hex")`.
+const CALLS = String.raw`(?:\([^()]*\)[\w$.]*)*`;
+const HASH_OPERAND = String.raw`[\w$.]*(?:hash|digest|derived)[\w$.]*${CALLS}`;
+const HASH_COMPARE = new RegExp(
+  String.raw`(?<![\w$.])${HASH_OPERAND}\s*[!=]==?\s*(?!(?:null|undefined|true|false)\b|\d|["'${"`"}])[\w$]` +
+    String.raw`|(?<![\w$.])(?!(?:null|undefined|true|false|typeof)\b)[\w$][\w$.]*${CALLS}\s*[!=]==?\s*${HASH_OPERAND}`,
+  "i",
+);
+const NOT_HASH_COMPARE = /\.length\s*[!=]==?|[!=]==?\s*[\w$.]*\.length\b|\btypeof\b|timingSafeEqual/;
 
 function secretIn(line) {
   if (TOKEN_FORMATS.some((format) => format.test(line))) return true;
@@ -156,6 +169,12 @@ export function findRisks(root, changed, startFiles = {}) {
     if (hash && PASSWORD.test(readLines(root, path).join("\n"))) {
       findings.push(
         `${path}: a fast hash in a file that handles passwords (\`${hash.trim().slice(0, 80)}\`; use \`bcryptjs\`, or \`scrypt\` with a random salt per user and \`timingSafeEqual\`, as the \`security\` skill shows)`,
+      );
+    }
+    const compare = !env && !TEST_FILE.test(path) && lines.find((line) => HASH_COMPARE.test(line) && !NOT_HASH_COMPARE.test(line));
+    if (compare && PASSWORD.test(readLines(root, path).join("\n"))) {
+      findings.push(
+        `${path}: a password hash compared with \`===\` (\`${compare.trim().slice(0, 80)}\`; compare the two Buffers with \`crypto.timingSafeEqual\`, as the \`security\` skill shows)`,
       );
     }
     // A new data-changing endpoint, and nothing in its file that checks who is calling. The check

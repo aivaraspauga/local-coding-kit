@@ -31,7 +31,7 @@ export async function deletePost(postId: string) {
 }
 ```
 
-No auth yet and the feature needs it? Use the library the user named. If they named none, do not stop to ask: pick one well-known library that does email and password with the project's database (Better Auth is a common choice for Next.js; it takes Node's `node:sqlite` `DatabaseSync` directly), check its install and setup in its docs for the installed version, and name your choice in the report. Never write your own password hashing, session tokens or crypto.
+No auth yet and the feature needs it? Use the library the user named. If they named none, do not stop to ask: pick one well-known library that does email and password with the project's database (Better Auth is a common choice for Next.js; it takes Node's `node:sqlite` `DatabaseSync` directly), check its install and setup in its docs for the installed version, and name your choice in the report. For plain email and password in a small app, Node's built-in `scrypt` is also fine, done exactly as section 6 shows; name that choice too. Never invent your own hashing scheme, token format or crypto.
 
 ## 2. Validate input on the server
 
@@ -73,7 +73,24 @@ Links from users: allow only `http:` and `https:` (a `javascript:` URL runs code
 - Session cookies: `httpOnly: true`, `secure: true` in production, `sameSite: "lax"` (or `"strict"`), `path: "/"`.
 - Random tokens and ids: `crypto.randomUUID()` or `crypto.randomBytes()`, never `Math.random()`.
 - Compare tokens and signatures with `crypto.timingSafeEqual`, not `===`.
-- Passwords: only through the auth library or argon2 / bcrypt; never stored or logged in plain text. On a new Node.js version the native `bcrypt` and `argon2` packages may have no prebuilt binary and fail to install without a C++ compiler: then use `bcryptjs` (pure JavaScript).
+- Passwords: through the auth library, argon2 / bcrypt, or Node's `scrypt` as below; never a fast hash (md5, sha*), never stored or logged in plain text. On a new Node.js version the native `bcrypt` and `argon2` packages may have no prebuilt binary and fail to install without a C++ compiler: then use `bcryptjs` (pure JavaScript) or `scrypt`.
+
+```ts
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+
+// Stored as "salt:hash", with a new random salt for each user.
+export function hashPassword(password: string) {
+  const salt = randomBytes(16).toString("hex");
+  return `${salt}:${scryptSync(password, salt, 64).toString("hex")}`;
+}
+
+export function checkPassword(password: string, stored: string) {
+  const [salt, hash] = stored.split(":");
+  if (!salt || !hash) return false;
+  const expected = Buffer.from(hash, "hex");
+  return expected.length === 64 && timingSafeEqual(scryptSync(password, salt, 64), expected); // never ===
+}
+```
 
 ## 7. CSRF and side effects
 

@@ -295,39 +295,36 @@ describe("guard", () => {
     assert.equal(run(listOrder, { agent: "explorer" }).permissionDecision, "allow", "other helpers");
     assert.equal(run(listOrder, { start: false }).permissionDecision, "allow", "no session start: size unknown");
   });
-  test("holds a 4th new code file until a check or test runs (small steps)", () => {
+  test("never holds a write, and reminds once after a 4th code file with no check run (small steps)", () => {
     const project = tempProject({ scripts: { typecheck: "tsc --noEmit", test: "vitest run" } }, { "tsconfig.json": "{}" });
     const session_id = `steps-${process.pid}-${Date.now()}`;
-    const edited = (path) =>
-      hook("focus.mjs", { session_id, hook_event_name: "PostToolUse", tool_name: "edit", tool_input: { file_path: join(project, path) } }, { project });
+    const edited = (path, root = project) =>
+      hook("focus.mjs", { session_id, hook_event_name: "PostToolUse", tool_name: "edit", tool_input: { file_path: join(root, path) } }, { project: root }).json
+        ?.hookSpecificOutput?.additionalContext ?? "";
     const ran = (command, event = "PostToolUse") =>
       hook("focus.mjs", { session_id, hook_event_name: event, tool_name: "run_shell_command", tool_input: { command }, tool_response: { stdout: "", stderr: "" } }, { project });
-    const decide = (path, extra = {}) =>
-      hook("guard.mjs", { session_id, tool_name: "write_file", tool_input: { file_path: join(project, path) }, ...extra }, { project }).json
+    const decide = (path) =>
+      hook("guard.mjs", { session_id, tool_name: "write_file", tool_input: { file_path: join(project, path) } }, { project }).json
         ?.hookSpecificOutput ?? { permissionDecision: "allow" };
     for (const path of ["src/a.ts", "src/b.tsx", "src/app/api/x/route.ts"]) {
       assert.equal(decide(path).permissionDecision, "allow", path);
-      edited(path);
+      assert.doesNotMatch(edited(path), /small steps/i, path);
     }
-    const held = decide("src/d.ts");
-    assert.equal(held.permissionDecision, "deny");
-    assert.match(held.permissionDecisionReason, /src\/a\.ts, src\/b\.tsx, src\/app\/api\/x\/route\.ts and have run no check/);
-    assert.match(held.permissionDecisionReason, /npm run typecheck/);
-    assert.equal(decide("src/a.ts").permissionDecision, "allow", "another edit to a changed file");
-    assert.equal(decide("tests/a.test.ts").permissionDecision, "allow", "a test");
-    assert.equal(decide("src/app/globals.css").permissionDecision, "allow", "styles");
-    assert.equal(decide("next.config.ts").permissionDecision, "allow", "a config");
-    assert.equal(decide("src/d.ts", { agent_id: "tester-1" }).permissionDecision, "allow", "inside a helper agent");
+    assert.equal(decide("src/d.ts").permissionDecision, "allow", "a 4th file is written, not held");
+    const note = edited("src/d.ts");
+    assert.match(note, /src\/a\.ts, src\/b\.tsx, src\/app\/api\/x\/route\.ts, src\/d\.ts and run no check/);
+    assert.match(note, /npm run typecheck/);
+    assert.doesNotMatch(edited("src/e.ts"), /small steps/i, "once per list, not after every file");
+    assert.doesNotMatch(edited("tests/a.test.ts"), /small steps/i, "a test");
     ran("git status");
-    assert.equal(decide("src/d.ts").permissionDecision, "deny", "git status is not a check");
+    assert.doesNotMatch(edited("src/f.ts"), /small steps/i, "still the same list: git status is not a check");
     ran("npm run typecheck", "PostToolUseFailure");
-    assert.equal(decide("src/d.ts").permissionDecision, "allow", "a failing check run counts too: it was seen");
+    for (const path of ["src/a.ts", "src/b.ts", "src/c.ts"]) assert.doesNotMatch(edited(path), /small steps/i, path);
+    assert.match(edited("src/d.ts"), /small steps/i, "a check run (failing too) starts a new list");
     const bare = tempProject(null);
-    for (const path of ["a.js", "b.js", "c.js"]) {
-      hook("focus.mjs", { session_id, hook_event_name: "PostToolUse", tool_name: "edit", tool_input: { file_path: join(bare, path) } }, { project: bare });
+    for (const path of ["a.js", "b.js", "c.js", "d.js"]) {
+      assert.doesNotMatch(edited(path, bare), /small steps/i, "a project with nothing to run");
     }
-    const free = hook("guard.mjs", { session_id, tool_name: "write_file", tool_input: { file_path: join(bare, "d.js") } }, { project: bare });
-    assert.equal(free.json, null, "a project with nothing to run");
   });
 });
 
@@ -981,6 +978,33 @@ describe("stop-check", () => {
     const findings = findRisks(project, ["src/auth.ts", "src/etag.ts"], {});
     assert.equal(findings.length, 1);
     assert.match(findings[0], /^src\/auth\.ts: a fast hash in a file that handles passwords/);
+  });
+  test("flags a password hash compared with ===, and not the safe scrypt or other comparisons", () => {
+    const project = tempProject(null, {
+      "src/bad.ts": [
+        "export function checkPassword(password: string, stored: string) {",
+        '  const [salt, hash] = stored.split(":");',
+        '  return scryptSync(password, salt, 64).toString("hex") === hash;',
+        "}",
+      ].join("\n"),
+      "src/bad-left.ts": "export const ok = (password: string, user: User) => user.passwordHash !== digestOf(password);\n",
+      "src/good.ts": [
+        "export function checkPassword(password: string, stored: string) {",
+        '  const [salt, hash] = stored.split(":");',
+        "  if (!salt || !hash) return false;",
+        '  const expected = Buffer.from(hash, "hex");',
+        "  return expected.length === 64 && timingSafeEqual(scryptSync(password, salt, 64), expected);",
+        "}",
+        'export const missing = (user: User) => user.passwordHash === null || typeof user.passwordHash !== "string";',
+        "export const hexLength = (password: string, hash: string) => hash.length === 128;",
+      ].join("\n"),
+      // Not about passwords: an ETag compare is not a timing risk worth a note.
+      "src/etag.ts": "export const fresh = (etagHash: string, header: string) => etagHash === header;\n",
+    });
+    const findings = findRisks(project, ["src/bad.ts", "src/bad-left.ts", "src/good.ts", "src/etag.ts"], {});
+    assert.equal(findings.length, 2, findings.join("\n"));
+    assert.match(findings[0], /^src\/bad\.ts: a password hash compared with `===`/);
+    assert.match(findings[1], /^src\/bad-left\.ts: a password hash compared with `===`/);
   });
   describe("route probe", () => {
     // A stand-in for `next start`: a plain server on the port it is given. `handle(method, url, body,

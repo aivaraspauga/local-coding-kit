@@ -271,10 +271,11 @@ export function changeSize(root, before = {}) {
   return { code, small: code.length <= 2 && !code.some((path) => RISKY.test(path)) };
 }
 
-// Small steps: after this many code files changed with no check or test run since, the guard holds
-// the next new one until the model runs one. The kit's auth run (2026-10-28) wrote 14 code files
-// before its first type check, so a wrong early guess spread through all of them. focus.mjs keeps
-// the list (state.unchecked) and clears it on a run. Tests do not count: they are run next anyway.
+// Small steps: after this many code files changed with no check or test run since, focus.mjs
+// reminds the model once to run one. The kit's auth run (2026-10-28) wrote 14 code files before
+// its first type check, so a wrong early guess spread through all of them. A refusal in the guard
+// (2026-10-29) lost writes inside batches of parallel calls, so it is a reminder now. focus.mjs
+// keeps the list (state.unchecked) and clears it on a run. Tests do not count: they are run next.
 export const SMALL_STEP_FILES = 3;
 const STEP_CODE = /\.([cm]?[jt]sx?|vue|svelte)$/;
 const OUTSIDE_STEPS = /(^|\/)(node_modules|\.qwen|\.claude|\.next|dist|build)\/|\.config\.[cm]?[jt]s$/;

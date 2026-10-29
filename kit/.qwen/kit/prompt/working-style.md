@@ -42,7 +42,7 @@ Thinking is the slowest part of your work.
 
 ## 4. Change
 - Big work (several features, "build me an app"): `plan-work`, then one step at a time. One page, component, endpoint or fix needs no plan.
-- Small steps: change at most 3 code files (tests not counted), then run the type check or their tests before the next file. The guard holds a 4th new file until you do.
+- Small steps: change at most 3 code files (tests not counted), then run the type check or their tests before the next file. After a 4th file with no check, the kit reminds you.
 - Small change (1-2 code files, no new route, page, table or package, nothing on the server, data or auth): fix it, add a unit or component test, run the checks once, report. No e2e test, no page check, no reviewer.
 - Smallest change that solves the task. No refactors or renames you weren't asked for, no handling of impossible cases. If 200 lines could be 50, rewrite it.
 - Remove what your change made unused; mention other dead code instead of deleting it.

@@ -15,6 +15,7 @@ import {
   projectRoot,
   readInput,
   readState,
+  SMALL_STEP_FILES,
   writeState,
 } from "./lib/project.mjs";
 
@@ -264,20 +265,31 @@ if (shell && RUNS.test(text) && TEST_RUN.test(text) && !inSubagent) {
   }
 }
 
-// Small steps (the guard enforces them): the code files changed since the last check, test or build
-// run. Any such run clears the list, passing or not: the model has seen what its changes do.
+// Small steps: the code files changed since the last check, test or build run (a reminder past
+// SMALL_STEP_FILES, once per list; the write itself always goes through: a refusal inside a batch
+// of parallel writes went unnoticed, 2026-10-29). Any such run clears the list, passing or not:
+// the model has seen what its changes do.
 if (!inSubagent && (tool === "Edit" || tool === "Write") && event === "PostToolUse") {
   const root = projectRoot();
   const rel = relative(root, resolve(root, String(params.file_path ?? ""))).replaceAll("\\", "/");
   const projectState = readState(root, input.session_id);
   const unchecked = projectState.unchecked ?? [];
   if (isStepCode(rel) && !unchecked.includes(rel)) {
-    writeState(root, input.session_id, { ...projectState, unchecked: [...unchecked, rel] });
+    const list = [...unchecked, rel];
+    const command = list.length > SMALL_STEP_FILES && !projectState.stepNoted && checkCommand(root);
+    if (command) {
+      notes.push(
+        `You have changed ${list.join(", ")} and run no check since. Work in small steps: run the type check (or the tests for these files) before the next file, and fix what it finds. (The full check command is \`${command}\`; one part of it is enough here.)`,
+      );
+    }
+    writeState(root, input.session_id, { ...projectState, unchecked: list, stepNoted: Boolean(projectState.stepNoted || command) });
   }
 } else if (shell && RUNS.test(text) && (TEST_RUN.test(text) || /build/.test(text)) && !input.is_interrupt) {
   const root = projectRoot();
   const projectState = readState(root, input.session_id);
-  if (projectState.unchecked?.length) writeState(root, input.session_id, { ...projectState, unchecked: [] });
+  if (projectState.unchecked?.length || projectState.stepNoted) {
+    writeState(root, input.session_id, { ...projectState, unchecked: [], stepNoted: false });
+  }
 }
 
 // Long thinking in the step that made this call: once per message.
