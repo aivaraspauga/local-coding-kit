@@ -383,6 +383,32 @@ describe("guard", () => {
     assert.doesNotMatch(helper.json?.hookSpecificOutput?.additionalContext ?? "", /NOT DONE/);
     assert.match(after("ls"), /NOT DONE/);
   });
+  test("saves the reviewer's answer, and points a second review of unchanged files to it", () => {
+    const project = tempProject({ scripts: { check: "node -e process.exit(0)" } }, { "src/a.ts": "export const a = 1;\n" });
+    const session_id = `review-${process.pid}-${Date.now()}`;
+    const reviewer = { subagent_type: "reviewer", prompt: "Review the change." };
+    const guard = () => hook("guard.mjs", { session_id, tool_name: "agent", tool_input: reviewer }, { project }).json?.hookSpecificOutput;
+    // Qwen Code runs no PostToolUse hook for a helper; SubagentStop gets its final answer.
+    const stopped = (agent_type, last_assistant_message) =>
+      hook("review-saved.mjs", { session_id, hook_event_name: "SubagentStop", agent_id: "r-1", agent_type, last_assistant_message }, { project });
+    const next = () =>
+      hook("focus.mjs", { session_id, hook_event_name: "PostToolUse", tool_name: "read_file", tool_input: { file_path: join(project, "src/a.ts") }, tool_response: "x" }, { project }).json
+        ?.hookSpecificOutput?.additionalContext ?? "";
+    assert.equal(guard(), undefined, "a first review runs");
+    assert.equal(stopped("reviewer", "## Review\n1. src/a.ts:1 bad JSON gives 500").code, 0);
+    assert.equal(readFileSync(join(project, ".local-agent", "review.md"), "utf8"), "## Review\n1. src/a.ts:1 bad JSON gives 500\n");
+    assert.match(next(), /saved in `\.local-agent\/review\.md`/, "said on the next tool result");
+    assert.doesNotMatch(next(), /saved in/, "said once");
+    const again = guard();
+    assert.equal(again.permissionDecision, "deny", "the same files again");
+    assert.match(again.permissionDecisionReason, /reviewed already .* `\.local-agent\/review\.md`/);
+    writeFileSync(join(project, "src/a.ts"), "export const a = 2;\n");
+    assert.equal(guard(), undefined, "changed files get a new review");
+    // Other helpers and empty answers are not saved.
+    stopped("explorer", "found it");
+    stopped("reviewer", "  ");
+    assert.equal(readFileSync(join(project, ".local-agent", "review.md"), "utf8"), "## Review\n1. src/a.ts:1 bad JSON gives 500\n");
+  });
   test("never holds a write, and reminds once after a 4th code file with no check run (small steps)", () => {
     const project = tempProject({ scripts: { typecheck: "tsc --noEmit", test: "vitest run" } }, { "tsconfig.json": "{}" });
     const session_id = `steps-${process.pid}-${Date.now()}`;

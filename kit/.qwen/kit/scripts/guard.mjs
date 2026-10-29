@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -16,11 +16,13 @@ import {
   CHECK_CONFIGS,
   checkCommand,
   describeCall,
+  fingerprint,
   noteRefused,
   output,
   projectRoot,
   readInput,
   readState,
+  REVIEW_FILE,
   writeState,
 } from "./lib/project.mjs";
 
@@ -295,6 +297,15 @@ if (tool === "Bash") {
   // files in batches of parallel calls and did not notice which ones were refused: a 03-auth run
   // (2026-10-29) lost 19 writes, believed them done, and timed out at 2/9 rebuilding them.
 } else if (tool === "Agent" && String(params.subagent_type ?? "").toLowerCase() === "reviewer") {
+  // The same files reviewed already: the answer is saved, and a second review finds the same things.
+  // A run lost track of its 5 findings and started an 8-minute second review of unchanged files,
+  // which used up its time (2026-10-29). Changed files get a new review.
+  if (state.reviewed && state.reviewed === fingerprint(root) && existsSync(join(root, REVIEW_FILE))) {
+    decide(
+      "deny",
+      `These files were reviewed already and have not changed since. The review is in \`${REVIEW_FILE}\`: read it with read_file and fix its findings. After you change files, a new review is allowed.`,
+    );
+  }
   // A small change gets no reviewer: on a two-file bug fix it took 5.9 of the run's 13.8 minutes and
   // found nothing, while the run without the kit made the same fix in 2.5 (2026-10-28). Server,
   // data and dependency changes keep it; so does a review the user asked for.

@@ -15,6 +15,7 @@ import {
   projectRoot,
   readInput,
   readState,
+  REVIEW_FILE,
   SMALL_STEP_FILES,
   takeRefused,
   writeState,
@@ -302,6 +303,19 @@ if (!inSubagent && (tool === "Edit" || tool === "Write") && event === "PostToolU
   const projectState = readState(root, input.session_id);
   if (projectState.unchecked?.length || projectState.stepNoted) {
     writeState(root, input.session_id, { ...projectState, unchecked: [], stepNoted: false });
+  }
+}
+
+// The reviewer's answer was saved (review-saved.mjs, when the reviewer stopped): say so once, on the
+// next tool result. A run believed the answer was cut off and never fixed its 5 findings (2026-10-29).
+if (!inSubagent) {
+  const root = projectRoot();
+  const projectState = readState(root, input.session_id);
+  if (projectState.reviewNote) {
+    writeState(root, input.session_id, { ...projectState, reviewNote: false });
+    notes.push(
+      `The reviewer's answer is saved in \`${REVIEW_FILE}\`: if you cannot see all of it, read it there. Fix each finding it lists, or say in your report why one is not a real problem, then run the checks again. A second review of the same files is not needed.`,
+    );
   }
 }
 

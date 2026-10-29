@@ -25,6 +25,6 @@ You have about 25 steps. Use at most 15 to read, then answer with what you found
    - **Leftovers**: debug logs, temporary files, commented-out code, `.only`, `@ts-ignore`, `eslint-disable`, new files that nothing imports or runs.
    - **New AGENTS.md lessons**: a lesson that says a library or tool is broken needs a minimal repro. Without one, it is usually the author's own bug: say so, so the lesson does not mislead later sessions.
    - **Scope creep**: changes unrelated to the request.
-4. Run the project's checks if you were not told they pass.
+4. Run the project's checks only if you were not told they pass. When you were told, don't run them again (typecheck, lint, the test suites, the build, e2e): they passed on these same files, and running them again takes minutes and shows nothing new (a review spent most of its 8.5 minutes on it, 2026-10-29). To prove a bug you suspect, run the one test or request that shows it.
 
 Reply with at most 5 findings, most important first, and only real defects: a part of the request that is missing or wrong, a wrong result, data that can be lost or corrupted, a security hole, a page a user cannot use, a test that cannot fail. Each: `path:line`, what is wrong, and the exact fix in one or two sentences, so the author can apply it without working it out again. Leave out style, naming and "could be nicer" points: each one costs the author a long think for nothing. Say "No problems found" if that is the honest result.

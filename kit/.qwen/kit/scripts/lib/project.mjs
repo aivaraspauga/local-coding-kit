@@ -186,6 +186,8 @@ export function output(object) {
 // Where the plan-work skill saves the current plan, relative to the project root. Not under
 // .qwen/: that folder is the kit, which the model must leave alone.
 export const PLAN_FILE = ".local-agent/plan.md";
+// The reviewer's last answer (focus.mjs saves it), so its findings survive a long or crowded context.
+export const REVIEW_FILE = ".local-agent/review.md";
 
 // "size:mtime" of the plan file, or null without one. The Stop hook compares it with the value at
 // session start to tell this session's plan from an old one about other work.
